@@ -1,6 +1,6 @@
 ![](https://i.imgur.com/Ki5bX0I.gif)
 
-[English](https://github.com/IgorTimofeev/MineOS/blob/master/README.md) | [中文(简体)](https://github.com/IgorTimofeev/MineOS/blob/master/README-zh_CN.md) | Русский
+[English](https://github.com/Anonymous1000MC/TheanOS/blob/master/README.md) | [中文(简体)](https://github.com/Anonymous1000MC/TheanOS/blob/master/README-zh_CN.md) | Русский
 
 ## О системе
 
@@ -27,7 +27,7 @@ MineOS - это графическая операционная система �
 
 Если по какой-то причине ресурс pastebin для вас недоступен, используйте альтернативную команду для установки:
 
-	wget -f https://raw.githubusercontent.com/IgorTimofeev/MineOS/master/Installer/OpenOS.lua /tmp/installer.lua && /tmp/installer.lua
+	wget -f https://raw.githubusercontent.com/Anonymous1000MC/TheanOS/master/Installer/OpenOS.lua /tmp/installer.lua && /tmp/installer.lua
 
 Вы можете вставить её в консоль, используя среднюю кнопку мыши или кнопку Insert (по умолчанию). Спустя некоторое время запустится симпатичный установщик, где вам предложат выбрать предпочитаемый язык, загрузочный диск (можно отформатировать, если нужно), создать профиль пользователя и настроить несколько параметров под себя.
 
