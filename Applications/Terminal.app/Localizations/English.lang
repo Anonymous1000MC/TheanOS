@@ -19,6 +19,7 @@
 	clearDesc = "clear the screen",
 	echoDesc = "print text",
 	exitDesc = "close the terminal",
+	panicDesc = "deliberately crash the system, to test the panic screen",
 	sleepDesc = "wait for a number of seconds",
 
 	pwdDesc = "print the working directory",

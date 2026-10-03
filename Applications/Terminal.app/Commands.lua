@@ -333,6 +333,24 @@ commands.echo = {
 	end,
 }
 
+-- Diagnostic: raises a real error from inside an event handler, which is
+-- exactly how the main loop catches faults, so this exercises the genuine
+-- kernel panic path rather than simulating it.
+commands.panic = {
+	usage = "panic [message]",
+	desc = localization.panicDesc or "deliberately crash the system, to test the panic screen",
+	run = function(context, args)
+		local message = #args > 0 and table.concat(args, " ") or "panic command invoked from the terminal"
+
+		context:warn("raising: " .. message)
+
+		-- Let the warning reach the screen before the fault tears the loop down.
+		require("Event").sleep(0.4)
+
+		error(message, 0)
+	end,
+}
+
 commands.exit = {
 	usage = "exit",
 	desc = localization.exitDesc or "close the terminal",

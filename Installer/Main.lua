@@ -891,6 +891,10 @@ addStage(function()
 		filesystem.writeTable(paths.system.versions, versions, true)
 	end)
 
+	-- Storing the hash manifest that shipped with these files, so the first
+	-- system update can diff against it instead of re-downloading everything.
+	download("Packages/manifest.cfg", "/Manifest.cfg")
+
 	-- Done info
 	layout:removeChildren()
 	addImage(1, 1, "Done")

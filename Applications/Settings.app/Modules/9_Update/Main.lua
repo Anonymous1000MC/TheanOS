@@ -32,6 +32,8 @@ local REPOSITORY = "https://raw.githubusercontent.com/Anonymous1000MC/TheanOS/ma
 local LOCAL_VERSION_PATH = "/Version.cfg"
 local REMOTE_VERSION_URL = REPOSITORY .. "Version.cfg"
 local REMOTE_FILES_URL = REPOSITORY .. "Installer/Files.cfg"
+local REMOTE_MANIFEST_URL = REPOSITORY .. "Packages/manifest.cfg"
+local LOCAL_MANIFEST_PATH = "/Manifest.cfg"
 
 local COLOR = {
 	text = 0x696969,
@@ -194,10 +196,84 @@ local function buildUpdateList(remoteFiles, userSettings)
 end
 
 --------------------------------------------------------------------------------
+-- Update plan
+--------------------------------------------------------------------------------
+
+-- Reads the hash manifest the device stored when these files were installed.
+local function readLocalManifest()
+	if not filesystem.exists(LOCAL_MANIFEST_PATH) then
+		return nil
+	end
+
+	local data = filesystem.readTable(LOCAL_MANIFEST_PATH)
+	return data and data.files or nil
+end
+
+-- Decides what actually needs downloading.
+--
+-- The remote manifest maps every installable path to the SHA-256 of its contents.
+-- Comparing that against the copy on the device means we only fetch files that
+-- genuinely differ. Hashing happens on the build machine, never here: MineOS's
+-- SHA-256 is pure Lua and the install set is ~2 MB, so hashing it on the
+-- computer would take minutes. The device only ever compares table entries.
+--
+-- Returns a list plus a little detail for the UI, and whether the manifest
+-- should be saved when the run finishes.
+local function buildPlan()
+	local body, reason = internet.request(REMOTE_MANIFEST_URL)
+	if not body then
+		return nil, "manifest: " .. tostring(reason or "?")
+	end
+
+	local remote = deserialize(body)
+	if not remote or type(remote.files) ~= "table" then
+		return nil, "manifest: unreadable"
+	end
+
+	local installed = readLocalManifest()
+
+	-- Sorted so the run is deterministic and the progress bar advances evenly.
+	local paths = {}
+	for path in pairs(remote.files) do
+		paths[#paths + 1] = path
+	end
+	table.sort(paths)
+
+	local list, dropped = {}, 0
+
+	for i = 1, #paths do
+		local path = paths[i]
+
+		if not installed or installed[path] ~= remote.files[path] or not filesystem.exists(path) then
+			list[#list + 1] = path
+		end
+	end
+
+	-- Files this device installed that the manifest no longer lists. Reported
+	-- rather than deleted: removing a file the user may have edited is a worse
+	-- failure than leaving a stale one behind.
+	if installed then
+		for path in pairs(installed) do
+			if remote.files[path] == nil then
+				dropped = dropped + 1
+			end
+		end
+	end
+
+	return {
+		list = list,
+		total = #paths,
+		dropped = dropped,
+		baseline = installed ~= nil,
+		manifest = remote,
+	}
+end
+
+--------------------------------------------------------------------------------
 -- The update run
 --------------------------------------------------------------------------------
 
-local function runUpdate(onFinished)
+local function runUpdate(plan, onFinished)
 	local box = openOverlay(t("updating", "Updating System"), false, true)
 
 	local statusText = box:addChild(GUI.text(1, 1, COLOR.text, t("preparing", "Preparing...")))
@@ -231,32 +307,24 @@ local function runUpdate(onFinished)
 		finish(false, t("updateCancelled", "Update cancelled."))
 	end
 
-	-- The manifest is the same one the installer uses, so an update installs
-	-- exactly what a fresh install would for the files already present.
-	local body, reason = internet.request(REMOTE_FILES_URL)
-	if not body then
-		finish(false, t("updateFailed", "Update failed: %s"):format(reason or "?"))
-		return
-	end
-
-	local remoteFiles, parseReason = deserialize(body)
-	if not remoteFiles then
-		finish(false, t("updateFailed", "Update failed: %s"):format(parseReason or "?"))
-		return
-	end
-
-	local userSettings = system.getUserSettings and system.getUserSettings() or {}
-	local list = buildUpdateList(remoteFiles, userSettings)
+	local list = plan.list
 
 	if #list == 0 then
-		finish(false, t("updateFailed", "Update failed: nothing to install"))
+		closeOverlay()
+		workspace:draw()
+
+		if onFinished then
+			onFinished(true, t("nothingToDo", "Everything is already up to date."))
+		end
+
 		return
 	end
 
-	-- Downloading every file in one go would block the workspace loop for
-	-- minutes: no repaint of other windows and no way to cancel. Instead the
-	-- event handler does one file per pull, so input keeps being processed and
-	-- the progress bar keeps moving between files.
+	if plan.baseline then
+		statusText.text = t("planSummary", "%d of %d files changed"):format(#list, plan.total)
+		workspace:draw()
+	end
+
 	local failed, index = {}, 1
 
 	local function step()
@@ -267,13 +335,14 @@ local function runUpdate(onFinished)
 		local path = list[index]
 		statusText.text = t("installing", "Installing %d/%d: %s"):format(index, #list, filesystem.name(path))
 
-		local target = "/" .. path
+		-- Manifest keys are already absolute, so do not prefix another slash.
+		local target = path:sub(1, 1) == "/" and path or ("/" .. path)
 		local proxy, proxyPath = filesystem.get(target)
 		if proxy then
 			proxy.makeDirectory(filesystem.path(proxyPath))
 		end
 
-		local ok, why = internet.download(REPOSITORY .. urlEncode(path), target)
+		local ok, why = internet.download(REPOSITORY .. urlEncode(target:sub(2)), target)
 		if not ok then
 			failed[#failed + 1] = path
 		end
@@ -300,8 +369,10 @@ local function runUpdate(onFinished)
 		end
 
 		if done then
-			-- Keep the version marker in step with the files we just wrote.
+			-- Keep the marker files in step with what we just wrote, so the next
+			-- run can diff against this state instead of downloading everything.
 			internet.download(REMOTE_VERSION_URL, LOCAL_VERSION_PATH)
+			internet.download(REMOTE_MANIFEST_URL, LOCAL_MANIFEST_PATH)
 
 			if #failed == 0 then
 				finish(true, t("updateDone", "The system has been updated."))
@@ -368,11 +439,33 @@ local function checkForUpdates()
 end
 
 local function confirmUpdate(latestVersion)
+	local plan, planReason = buildPlan()
+
 	local box = openOverlay(t("updateTitle", "System update"), true)
 
-	box:addChild(GUI.text(1, 1, COLOR.text, t("updatePrompt", "Update from %s to %s?"):format(
-		readLocalVersion() or t("unknown", "unknown"), latestVersion
-	)))
+	if plan then
+		local detail
+
+		if #plan.list == 0 then
+			detail = t("planNothing", "All %d files are already current."):format(plan.total)
+		elseif plan.baseline then
+			detail = t("planSummary", "%d of %d files changed"):format(#plan.list, plan.total)
+		else
+			detail = t("planFirstRun", "No update record on this system, so all %d files will be fetched."):format(#plan.list)
+		end
+
+		if plan.dropped > 0 then
+			detail = detail .. "\n" .. t("planDropped", "%d file(s) are no longer part of the system and were left alone."):format(plan.dropped)
+		end
+
+		box:addChild(GUI.text(1, 1, COLOR.text, t("updatePrompt", "Update from %s to %s?"):format(
+			readLocalVersion() or t("unknown", "unknown"), latestVersion
+		)))
+		box:addChild(GUI.text(1, 1, COLOR.accent, detail))
+	else
+		box:addChild(GUI.text(1, 1, COLOR.error, t("planFailed", "Could not work out what changed: %s"):format(planReason)))
+	end
+
 	box:addChild(GUI.object(1, 1, 1, 1))
 
 	local buttons = box:addChild(GUI.layout(1, 1, 30, 3, 1, 1))
@@ -380,7 +473,13 @@ local function confirmUpdate(latestVersion)
 	buttons:setSpacing(1, 1, 2)
 
 	buttons:addChild(GUI.adaptiveRoundedButton(1, 1, 2, 0, 0x66DB80, 0xFFFFFF, 0x33B65C, 0xFFFFFF, t("install", "Install"))).onTouch = function()
-		runUpdate(function()
+		if not plan then
+			closeOverlay()
+			workspace:draw()
+			return
+		end
+
+		runUpdate(plan, function()
 			checkForUpdates()
 		end)
 	end
