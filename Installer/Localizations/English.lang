@@ -10,6 +10,10 @@
 	applications = "Third party apps:",
 	languages = "Language packs:",
 	accept = "I accept this shit:",
+	appearance = "Appearance",
+	themeLight = "Light",
+	themeDark = "Dark",
+	themeInstallerOnly = "Appearance applies to the installer only. The installed system always boots with its default look.",
 	select = "Select disk for installation",
 	erase = "Erase",
 	used = "used",
@@ -18,6 +22,6 @@
 	flashing = "Flashing EEPROM...",
 	creating = "Creating user profile...",
 	installing = "Installing",
-	installed = "MineOS has been installed. Enjoy!",
+	installed = "TheanOS has been installed. Enjoy!",
 	reboot = "Reboot the computer",
 }
