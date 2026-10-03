@@ -1113,9 +1113,11 @@ commands.fastfetch = {
 		end
 
 		for i = 1, math.max(#logo, #info) do
+			-- raw, not out(): the logo is column-aligned art and text.wrap()
+			-- would strip its indentation
 			local left = logo[i] or (" "):rep(7)
 			local right = info[i] or ""
-			context:out(("%s  %s"):format(left, right), i == 1 and COLOR.heading or nil)
+			context:raw(("%s  %s"):format(left, right), i == 1 and COLOR.heading or nil)
 		end
 	end,
 }

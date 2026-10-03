@@ -145,8 +145,23 @@ local function appendLine(value, color)
 	trimScrollback()
 end
 
+-- Appends without wrapping. text.wrap() word-splits on whitespace and strips
+-- leading/trailing spaces, which destroys any column-aligned output such as the
+-- fastfetch logo.
+local function appendRawLine(value, color)
+	local lines = tostring(value):gsub("\r", ""):gsub("\n", " \n ")
+
+	for piece in lines:gmatch("(.-) \n ") do
+		shell.lines[#shell.lines + 1] = {text = piece, color = color or COLOR.text}
+	end
+end
+
 function shell.out(value, color)
 	appendLine(value, color)
+end
+
+function shell.raw(value, color)
+	appendRawLine(value, color)
 end
 
 function shell.err(value)
@@ -227,6 +242,7 @@ function CONTEXT:heading(value)      appendLine(value, COLOR.heading) end
 function CONTEXT:ok(value)           appendLine(value, COLOR.ok) end
 function CONTEXT:accent(value)       appendLine(value, COLOR.accent) end
 function CONTEXT:dim(value)          appendLine(value, COLOR.dim) end
+function CONTEXT:raw(value, color) appendRawLine(value, color) end
 function CONTEXT:clear()             shell.clear() end
 function CONTEXT:quit()              shell.terminate() end
 function CONTEXT:redraw()            workspace:draw() end
