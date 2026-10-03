@@ -116,6 +116,18 @@ end
 -- Helpers
 --------------------------------------------------------------------------------
 
+-- The installed version lives in /Version.cfg; there is no system.version field.
+local function systemVersion()
+	if filesystem.exists("/Version.cfg") then
+		local data = filesystem.readTable("/Version.cfg")
+		if data and data.version then
+			return data.version
+		end
+	end
+
+	return "unknown"
+end
+
 local function humanSize(bytes)
 	if not bytes then return "-" end
 
@@ -214,7 +226,7 @@ local function installFile(remotePath, context)
 	local proxy, proxyPath = filesystem.get(target)
 
 	if proxy then
-		proxy.makeDirectory(paths.path(proxyPath))
+		proxy.makeDirectory(filesystem.path(proxyPath))
 	end
 
 	local ok, reason = internet.download(PACKAGE_BASE_URL .. urlEncode(target:sub(2)), target)
@@ -587,7 +599,7 @@ commands.touch = {
 
 			if not filesystem.exists(path) then
 				local proxy, proxyPath = filesystem.get(path)
-				proxy.makeDirectory(paths.path(proxyPath))
+				proxy.makeDirectory(filesystem.path(proxyPath))
 
 				local handle = proxy.open(proxyPath, "wb")
 				if handle then proxy.close(handle) end
@@ -953,7 +965,7 @@ commands.uname = {
 
 		if all then
 			context:out(("TheanOS %s on %s (%s) -- OpenComputers"):format(
-				system.version or "1.0", context:host(), context:user()
+				systemVersion(), context:host(), context:user()
 			))
 		else
 			context:out("TheanOS")
@@ -1083,7 +1095,7 @@ commands.fastfetch = {
 		local info = {
 			("user@%s"):format(context:host()),
 			"",
-			("OS        %s"):format(osVersion()),
+			("OS        %s (TheanOS %s)"):format(osVersion(), systemVersion()),
 			("Host      %s"):format(context:host()),
 			("Kernel    Lua %s"):format(_VERSION:match("%d+%.%d+") or "?"),
 			("Shell     TheanOS terminal"),

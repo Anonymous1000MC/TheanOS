@@ -2,7 +2,6 @@
 local GUI = require("GUI")
 local filesystem = require("Filesystem")
 local internet = require("Internet")
-local paths = require("Paths")
 local system = require("System")
 
 local module = {}
@@ -236,7 +235,7 @@ local function runUpdate(onFinished)
 		local target = "/" .. path
 		local proxy, proxyPath = filesystem.get(target)
 		if proxy then
-			proxy.makeDirectory(paths.path(proxyPath))
+			proxy.makeDirectory(filesystem.path(proxyPath))
 		end
 
 		local ok, why = internet.download(REPOSITORY .. urlEncode(path), target)
