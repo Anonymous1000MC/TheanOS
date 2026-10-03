@@ -24,6 +24,7 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MANIFEST = os.path.join(ROOT, "Packages", "manifest.cfg")
+VERSION = os.path.join(ROOT, "Version.cfg")
 
 # The path set that can end up installed at "/". installerFiles is deliberately
 # excluded: those are staged in the temporary installer directory, not installed.
@@ -63,6 +64,34 @@ def digest(rel):
     return h.hexdigest()
 
 
+def read_version():
+    """Pull the release metadata out of Version.cfg.
+
+    It is a plain Lua table, so the values can be read with a regex rather than
+    dragging in a Lua interpreter. Embedded newlines become \\n so the note
+    survives as a single quoted string in the manifest.
+    """
+    meta = {}
+    if not os.path.exists(VERSION):
+        return meta
+
+    with io.open(VERSION, encoding="utf-8") as f:
+        text = f.read()
+
+    for key in ("version", "released", "channel", "name"):
+        m = re.search(r'^\s*%s\s*=\s*"([^"]*)"' % key, text, re.M)
+        if m:
+            meta[key] = m.group(1)
+
+    m = re.search(r'^\s*notes\s*=\s*"((?:[^"\\]|\\.)*)"', text, re.M)
+    if m:
+        note = m.group(1)
+        note = note.replace("\\n", "\n").replace('\\"', '"').replace("\\\\", "\\")
+        meta["notes"] = " ".join(note.split())
+
+    return meta
+
+
 def build(paths):
     files, missing = {}, []
     for rel in paths:
@@ -71,9 +100,16 @@ def build(paths):
             continue
         files["/" + rel] = digest(rel)
 
+    meta = read_version()
+
     out = ["{",
            "\tversion = 1,",
            "\tcount = %d," % len(files),
+           "\trelease = {"]
+    for key in ("version", "released", "channel", "name", "notes"):
+        if key in meta:
+            out.append('\t\t%s = "%s",' % (key, meta[key].replace("\\", "\\\\").replace('"', '\\"')))
+    out += ["\t},",
            "\tfiles = {"]
     for path in sorted(files):
         out.append('\t\t["%s"] = "%s",' % (path, files[path]))

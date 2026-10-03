@@ -4,13 +4,18 @@
 local Commands = {}
 
 -- Injected by Main.lua as chunk varargs.
-local injectedLocalization, injectedColor = ...
+local injectedLocalization, injectedColor, modulesPath = ...
 
 local localization = injectedLocalization or {}
 local COLOR = injectedColor or {}
 
 Commands.localization = localization
 Commands.COLOR = COLOR
+
+-- Filled in by Main.lua: the modules need the same persistent state the shell
+-- itself uses, so `alias` and `export` affect the very next command.
+Commands.state = Commands.state or {aliases = {}, environment = {}, tldr = {}}
+Commands.saveState = Commands.saveState or function() end
 
 local filesystem = require("Filesystem")
 local internet = require("Internet")
@@ -557,7 +562,28 @@ commands.cat = {
 	desc = localization.catDesc or "print the contents of files",
 	run = function(context, args)
 		if #args == 0 then
-			context:err("cat: expected a file")
+			if not context.stdin then
+				context:err("cat: expected a file, or pipe something in")
+				return
+			end
+
+			local start = 1
+			local content = context.stdin
+
+			-- Walk newlines rather than appending one and gmatching, which would
+			-- add a phantom empty line at the end of every piped read.
+			while true do
+				local newline = content:find("\n", start, true)
+
+				if not newline then
+					if start <= #content then context:out(content:sub(start)) end
+					break
+				end
+
+				context:out(content:sub(start, newline - 1))
+				start = newline + 1
+			end
+
 			return
 		end
 
@@ -738,17 +764,80 @@ commands.mv = {
 -- Text utilities
 --------------------------------------------------------------------------------
 
+-- Splits on newlines without inventing a trailing empty line. Appending a
+-- newline and gmatching always yields one, which shifts every count and makes
+-- `tail -n 2` print the wrong line.
+--
+-- Note: not textLib.split, whose implementation does s:gmatch(delimiter) and
+-- therefore yields the delimiters rather than the fields between them.
+local function splitLines(content)
+	local lines, start = {}, 1
+
+	while true do
+		local newline = content:find("\n", start, true)
+
+		if not newline then
+			if start <= #content then lines[#lines + 1] = content:sub(start) end
+			break
+		end
+
+		lines[#lines + 1] = content:sub(start, newline - 1)
+		start = newline + 1
+	end
+
+	return lines
+end
+
+-- Splits piped input into lines, or reads the named files.
+local function gatherInput(context, paths)
+	local lines = {}
+
+	if #paths == 0 then
+		local input = context.stdin
+
+		if not input then return nil end
+
+		return splitLines(input)
+	end
+
+	for _, name in ipairs(paths) do
+		local content = filesystem.read(context:resolve(name))
+
+		if not content then
+			return nil, ("%s: unreadable"):format(name)
+		end
+
+		local fileLines = splitLines(content)
+		for i = 1, #fileLines do
+			lines[#lines + 1] = fileLines[i]
+		end
+	end
+
+	return lines
+end
+
 commands.grep = {
 	usage = "grep <pattern> <file...>",
 	desc = localization.grepDesc or "search for a pattern inside files",
 	run = function(context, args)
 		local pattern = args[1]
-		if not pattern or #args < 2 then
-			context:err("grep: usage: grep <pattern> <file...>")
+		if not pattern or (#args < 2 and not context.stdin) then
+			context:err("grep: usage: grep <pattern> [file...]")
 			return
 		end
 
 		local plain = not pattern:find("[%^%$%(%)%%%.%[%]%*%+%-%?]", 1)
+
+		-- Piped input: no file prefix, just the matching lines.
+		if context.stdin and #args < 2 then
+			for _, line in ipairs(splitLines(context.stdin)) do
+				if line:find(pattern, 1, plain) then
+					context:out(line, COLOR.ok)
+				end
+			end
+
+			return
+		end
 
 		for i = 2, #args do
 			local path = context:resolve(args[i])
@@ -760,7 +849,7 @@ commands.grep = {
 				local number = 0
 
 				for number, line in ipairs(textLib.split(content, "\n")) do
-					if line:find(pattern, plain) then
+					if line:find(pattern, 1, plain) then
 						context:out(("%s:%d: %s"):format(args[i], number, line), COLOR.ok)
 					end
 				end
@@ -773,8 +862,21 @@ commands.wc = {
 	usage = "wc <file...>",
 	desc = localization.wcDesc or "count lines, words and characters",
 	run = function(context, args)
+		-- With no arguments, read the pipe; otherwise count each named file.
 		if #args == 0 then
-			context:err("wc: expected a file")
+			if not context.stdin then
+				context:err("wc: expected a file, or pipe something in")
+				return
+			end
+
+			local content = context.stdin
+			local lines = 0
+			for _ in content:gmatch("[^\n]+") do lines = lines + 1 end
+
+			local words = 0
+			for _ in content:gmatch("%S+") do words = words + 1 end
+
+			context:out(("%d lines  %d words  %d bytes"):format(lines, words, #content))
 			return
 		end
 
@@ -814,23 +916,11 @@ commands.head = {
 			end
 		end
 
-		if #files == 0 then
-			context:err("head: expected a file")
-			return
-		end
+		local lines, reason = gatherInput(context, files)
+		if not lines then context:err("head: " .. (reason or "expected a file, or pipe something in")) return end
 
-		for _, name in ipairs(files) do
-			local content = filesystem.read(context:resolve(name))
-			if not content then
-				context:err(("head: %s: unreadable"):format(name))
-			else
-				local shown = 0
-				for line in (content .. "\n"):gmatch("(.-)\n") do
-					shown = shown + 1
-					if shown > count then break end
-					context:out(line)
-				end
-			end
+		for i = 1, math.min(count, #lines) do
+			context:out(lines[i])
 		end
 	end,
 }
@@ -852,25 +942,11 @@ commands.tail = {
 			end
 		end
 
-		if #files == 0 then
-			context:err("tail: expected a file")
-			return
-		end
+		local lines, reason = gatherInput(context, files)
+		if not lines then context:err("tail: " .. (reason or "expected a file, or pipe something in")) return end
 
-		for _, name in ipairs(files) do
-			local content = filesystem.read(context:resolve(name))
-			if not content then
-				context:err(("tail: %s: unreadable"):format(name))
-			else
-				local all = {}
-				for line in (content .. "\n"):gmatch("(.-)\n") do
-					all[#all + 1] = line
-				end
-
-				for i = math.max(1, #all - count + 1), #all do
-					context:out(all[i])
-				end
-			end
+		for i = math.max(1, #lines - count + 1), #lines do
+			context:out(lines[i])
 		end
 	end,
 }
@@ -1488,6 +1564,31 @@ commands.tpkg = {
 		context:err(("tpkg: unknown subcommand: %s"):format(subcommand))
 	end,
 }
+
+--------------------------------------------------------------------------------
+-- Command modules
+--
+-- Kept as separate files so this one does not grow without bound; each is handed
+-- the same localization table and palette this file received.
+--------------------------------------------------------------------------------
+
+for _, name in ipairs({"Diagnostics", "Text"}) do
+	local chunk = loadfile((modulesPath or "") .. name .. ".lua")
+
+	if chunk then
+		-- COMMANDS is passed as well: the modules register into this table and read
+		-- its shared state, so without it they cannot see any command.
+		local module = chunk(localization, COLOR, Commands)
+
+		if type(module) == "table" and type(module.commands) == "table" then
+			for command, definition in pairs(module.commands) do
+				commands[command] = definition
+			end
+		end
+	else
+		commands.help.warn = "command module " .. name .. " failed to load"
+	end
+end
 
 --------------------------------------------------------------------------------
 -- Aliases

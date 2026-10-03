@@ -42,6 +42,7 @@ local COLOR = {
 	warn = 0xB8860B,
 	error = 0xCC0040,
 	accent = 0x3366CC,
+	dim = 0x8A8A8A,
 }
 
 --------------------------------------------------------------------------------
@@ -207,6 +208,83 @@ local function readLocalManifest()
 
 	local data = filesystem.readTable(LOCAL_MANIFEST_PATH)
 	return data and data.files or nil
+end
+
+-- Greedy word wrap. GUI.text draws a single line and never wraps on its own, so
+-- long release notes have to be broken up before they are handed to it.
+local function wrapText(text, width)
+	local lines = {}
+
+	-- gmatch yields an iterator function, so this has to be a generic for;
+	-- ipairs would try to index the function itself.
+	for paragraph in (tostring(text) .. "\n"):gmatch("(.-)\n") do
+		paragraph = paragraph:gsub("^%s+", ""):gsub("%s+$", "")
+
+		if paragraph == "" then
+			lines[#lines + 1] = ""
+		else
+			local current = ""
+
+			for word in paragraph:gmatch("%S+") do
+				if current == "" then
+					current = word
+				elseif unicode.len(current .. " " .. word) <= width then
+					current = current .. " " .. word
+				else
+					lines[#lines + 1] = current
+					current = word
+				end
+			end
+
+			lines[#lines + 1] = current
+		end
+	end
+
+	return lines
+end
+
+-- Turns a list of changed paths into something a person can scan: one line per
+-- directory, with the file names when a directory only has one or two.
+--
+-- A system-wide change can touch hundreds of files, so the caller caps how many
+-- lines it wants and the remainder collapses into a single "and N more" line.
+local function describeChanges(list, limit)
+	local groups, order = {}, {}
+
+	for _, path in ipairs(list) do
+		local directory = path:match("^(.*)/[^/]*$") or ""
+		local name = path:match("([^/]*)$") or path
+
+		if groups[directory] == nil then
+			groups[directory] = {}
+			order[#order + 1] = directory
+		end
+
+		local bucket = groups[directory]
+		bucket[#bucket + 1] = name
+	end
+
+	table.sort(order)
+
+	local lines = {}
+	for i = 1, math.min(#order, limit) do
+		local directory, names = order[i], groups[order[i]]
+		local label = directory:gsub("^/", "")
+
+		if label == "" then label = t("planRoot", "system root") end
+
+		if #names == 1 then
+			lines[#lines + 1] = ("%s  (%s)"):format(names[1], label)
+		else
+			lines[#lines + 1] = ("%s  (%d files)"):format(label, #names)
+		end
+	end
+
+	if #order > limit then
+		lines[#lines + 1] = t("planMore", "and %d more location(s)"):format(#order - limit)
+	end
+
+	return lines
 end
 
 -- Decides what actually needs downloading.
@@ -462,6 +540,33 @@ local function confirmUpdate(latestVersion)
 			readLocalVersion() or t("unknown", "unknown"), latestVersion
 		)))
 		box:addChild(GUI.text(1, 1, COLOR.accent, detail))
+
+		-- Release notes straight from the manifest, so the changelog ships with the
+		-- build instead of being maintained in a second place that drifts.
+		local notes = plan.manifest and plan.manifest.release and plan.manifest.release.notes
+		if notes and notes ~= "" then
+			local heading = t("planNotes", "What's new:")
+
+			if plan.manifest.release.released then
+				heading = heading .. "  " .. plan.manifest.release.released
+			end
+
+			box:addChild(GUI.text(1, 1, COLOR.heading, heading))
+
+			-- Wrapped by hand: GUI.text does not wrap, and a single long line runs
+			-- off the edge of the overlay.
+			for _, line in ipairs(wrapText(notes, 52)) do
+				box:addChild(GUI.text(1, 1, COLOR.text, "  " .. line))
+			end
+		end
+
+		if #plan.list > 0 then
+			box:addChild(GUI.text(1, 1, COLOR.heading, t("planChanged", "Changed files:")))
+
+			for _, line in ipairs(describeChanges(plan.list, 6)) do
+				box:addChild(GUI.text(1, 1, COLOR.dim, "  " .. line))
+			end
+		end
 	else
 		box:addChild(GUI.text(1, 1, COLOR.error, t("planFailed", "Could not work out what changed: %s"):format(planReason)))
 	end

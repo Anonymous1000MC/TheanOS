@@ -303,6 +303,48 @@ local function panicDiagnostics()
 	return info
 end
 
+-- Written before anything is drawn: a panic that cannot record itself is no use,
+-- and a failure while logging must not replace the crash with a different one.
+local CRASH_LOG_PATH = "/Logs/crash.cfg"
+local CRASH_LOG_LIMIT = 16
+
+local function recordCrash(path, line, fault, stack, moduleName)
+	pcall(function()
+		local entries = {}
+
+		if filesystem.exists(CRASH_LOG_PATH) then
+			local ok, existing = pcall(filesystem.readTable, CRASH_LOG_PATH)
+			if ok and type(existing) == "table" and type(existing.entries) == "table" then
+				entries = existing.entries
+			end
+		end
+
+		-- Keep the stack bounded: these files live on a filesystem with very little room.
+		local trimmed = stack:sub(1, 4000)
+
+		entries[#entries + 1] = {
+			time = os.date("%Y-%m-%d %H:%M:%S"),
+			uptime = math.floor(computer.uptime()),
+			module = moduleName,
+			path = tostring(path or "unknown"),
+			line = line or 0,
+			fault = fault,
+			traceback = trimmed,
+		}
+
+		while #entries > CRASH_LOG_LIMIT do
+			table.remove(entries, 1)
+		end
+
+		local proxy, proxyPath = filesystem.get(CRASH_LOG_PATH)
+		if proxy then
+			proxy.makeDirectory(filesystem.path(proxyPath))
+		end
+
+		filesystem.writeTable(CRASH_LOG_PATH, {entries = entries}, true)
+	end)
+end
+
 local function kernelPanic(path, line, traceback)
 	component.invoke(GPUAddress, "setDepth", 8)
 	component.invoke(GPUAddress, "setBackground", PANIC_BACKGROUND)
@@ -322,6 +364,8 @@ local function kernelPanic(path, line, traceback)
 		fault = traceback:match("^[^\n]*") or traceback
 		stack = traceback:sub(#fault + 1):gsub("^\n", "")
 	end
+
+	recordCrash(path, line, fault, stack, moduleName)
 
 	panicCentered(2, PANIC_TEXT, "THEANOS KERNEL PANIC")
 	panicCentered(3, PANIC_DIM, panicFit("Not syncing: fatal error in " .. moduleName, screenWidth - 2))

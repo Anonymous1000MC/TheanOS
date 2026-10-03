@@ -53,7 +53,92 @@ end})
 
 -- Passed as varargs: Commands.lua binds them at load time, so assigning them
 -- after the call would be too late.
-local COMMANDS = assert(loadfile(currentScriptDirectory .. "Commands.lua"))(strings, COLOR)
+local COMMANDS = assert(loadfile(currentScriptDirectory .. "Commands.lua"))(
+	strings, COLOR, currentScriptDirectory .. "Modules/"
+)
+
+--------------------------------------------------------------------------------
+-- Persistent state: history, aliases, environment
+--
+-- Kept in the user's own application data so it survives reboots and is per-user.
+--------------------------------------------------------------------------------
+
+local statePath = paths.user.applicationData .. "Terminal/"
+
+local function loadState()
+	local state = {}
+
+	if filesystem.exists(statePath .. "state.cfg") then
+		local ok, data = pcall(filesystem.readTable, statePath .. "state.cfg")
+		if ok and type(data) == "table" then state = data end
+	end
+
+	state.history = type(state.history) == "table" and state.history or {}
+	state.aliases = type(state.aliases) == "table" and state.aliases or {}
+	state.environment = type(state.environment) == "table" and state.environment or {}
+	state.tldr = type(state.tldr) == "table" and state.tldr or {}
+
+	return state
+end
+
+local state = loadState()
+
+local function saveState()
+	filesystem.makeDirectory(statePath)
+	filesystem.writeTable(statePath .. "state.cfg", {
+		history = state.history,
+		aliases = state.aliases,
+		environment = state.environment,
+		tldr = state.tldr,
+	}, true)
+end
+
+-- Reads aliases and environment from ~/.theanrc. Intentionally a tiny format:
+--   alias name=value
+--   export NAME=value
+-- Anything unrecognised is ignored rather than being a syntax error.
+local function loadRC()
+	local path = paths.user.home .. ".theanrc"
+
+	local content = filesystem.read(path)
+	if not content then return end
+
+	local aliases, environment = {}, {}
+
+	for line in (content .. "\n"):gmatch("(.-)\n") do
+		line = line:gsub("^%s+", ""):gsub("%s+$", "")
+
+		local name, value = line:match("^alias%s+([%w_%-]+)%s*=%s*(.+)$")
+		if name then
+			aliases[name] = value:gsub("^%\"(.*)\"$", "%1")
+		end
+
+		-- `value` above belongs to the alias match, which did not fire here, so
+		-- the export value has to be captured in its own match.
+		local exported, exportedValue = line:match("^export%s+([%w_]+)%s*=%s*(.+)$")
+		if exported then
+			environment[exported] = exportedValue:gsub("^%\"(.*)\"$", "%1")
+		end
+	end
+
+	-- Command line wins over the rc file, which wins over the defaults.
+	for name, value in pairs(aliases) do
+		if state.aliases[name] == nil then state.aliases[name] = value end
+	end
+
+	for name, value in pairs(environment) do
+		if state.environment[name] == nil then state.environment[name] = value end
+	end
+end
+
+loadRC()
+
+local MAX_HISTORY = 200
+
+-- Let the command modules share this state, so `alias` / `export` / `tldr`
+-- mutate exactly what the shell reads.
+COMMANDS.state = state
+COMMANDS.saveState = saveState
 
 --------------------------------------------------------------------------------
 -- Shell state
@@ -287,58 +372,282 @@ end
 
 --------------------------------------------------------------------------------
 -- Dispatch
+--
+-- A line is a sequence of stages joined by |, with optional redirection and && / ;
+-- Each stage runs to completion and its stdout becomes the next stage's stdin.
+-- Nothing streams: output is collected per stage, which is the right trade here
+-- because the VM is cooperative and only one stage can run at a time anyway.
 --------------------------------------------------------------------------------
 
-function CONTEXT:run(line)
-	local trimmed = line:gsub("^%s+", ""):gsub("%s+$", "")
-	if trimmed == "" then return end
+local OPERATORS = {["|"] = true, [">"] = true, [">>"] = true, ["&&"] = true, [";"] = true}
 
-	appendLine(promptText() .. trimmed, COLOR.dim)
+-- Expands $NAME and ${NAME} from the shell environment.
+local function expand(tokens, environment)
+	local out = {}
 
-	local name, rest = trimmed:match("^(%S+)%s*(.*)$")
-	if not name then return end
+	for i = 1, #tokens do
+		local token = tokens[i]
+		local pieces, cursor, matched = {}, 1, false
 
-	local command = COMMANDS.commands[name] or COMMANDS.commands[name:lower()]
-	if not command then
-		self:err((strings.notFound or "tpkg: %s: command not found"):format(name))
-		self:dim(strings.tryHelp or "Type 'help' for the command list.")
-		return
-	end
+		while cursor <= #token do
+			local dollar = token:find("%$", cursor)
+			if not dollar or dollar == #token then break end
 
-	local previousElevation = shell.elevated
-	local ok, reason = pcall(command.run, self, COMMANDS.tokenize(rest), rest)
+			pieces[#pieces + 1] = token:sub(cursor, dollar - 1)
 
-	shell.elevated = previousElevation
+			local braced = token:match("^${([%w_]+)}", dollar)
+			local bare = braced or token:match("^%$([%w_]+)", dollar)
 
-	if not ok then
-		self:err((strings.failed or "error: %s"):format(tostring(reason)))
-	end
-end
+			if bare then
+				pieces[#pieces + 1] = tostring(environment[bare] or "")
+				cursor = dollar + (braced and (#bare + 2) or (#bare + 1))
+				matched = true
+			else
+				pieces[#pieces + 1] = "$"
+				cursor = dollar + 1
+			end
+		end
 
---------------------------------------------------------------------------------
--- Tab completion over command names
---------------------------------------------------------------------------------
-
-local function complete()
-	local fragment = shell.input:match("(%S*)$") or ""
-	local head = shell.input:sub(1, #shell.input - #fragment)
-
-	local names = {}
-	for name in pairs(COMMANDS.commands) do
-		names[#names + 1] = name
-	end
-	table.sort(names)
-
-	local matches = {}
-	for _, name in ipairs(names) do
-		if name:sub(1, #fragment) == fragment then
-			matches[#matches + 1] = name
+		if not matched then
+			out[#out + 1] = token
+		else
+			pieces[#pieces + 1] = token:sub(cursor)
+			out[#out + 1] = table.concat(pieces)
 		end
 	end
 
-	if #matches == 1 then
-		shell.input = head .. matches[1] .. " "
-	elseif #matches > 1 then
+	return out
+end
+
+-- Runs one stage. With `capture` set, anything it prints is collected for the
+-- next stage instead of going to the screen.
+local function runStage(context, argv, stdin, capture)
+	local captured = {}
+
+	local stageContext = capture and setmetatable({}, {__index = context}) or context
+
+	if capture then
+		function stageContext:out(value)
+			captured[#captured + 1] = tostring(value)
+		end
+	end
+
+	if stdin then
+		-- Expose the previous stage's output so filters like cat/sort/grep can
+		-- read a pipe instead of a file. It must NOT also go into `captured`,
+		-- which is what this stage RETURNS: seeding it made every capturing stage
+		-- emit its own input, so `cat f | grep x > out` wrote the file plus the
+		-- matches instead of just the matches.
+		stageContext.stdin = stdin
+	end
+
+	local name = argv[1]
+	local command = name and (COMMANDS.commands[name] or COMMANDS.commands[name:lower()])
+
+	if not command then
+		context:err((strings.notFound or "%s: command not found"):format(tostring(name)))
+		return false, nil
+	end
+
+	local previousCwd = shell.cwd
+	local previousElevation = shell.elevated
+	local ok, reason = pcall(command.run, stageContext, COMMANDS.tokenize(table.concat(argv, " ", 2)), table.concat(argv, " ", 2))
+
+	-- A stage must not leave the shell pointed somewhere else, or `a | cd /x` would
+	-- silently change the directory for everything after it.
+	if shell.cwd ~= previousCwd then shell.cwd = previousCwd end
+	shell.elevated = previousElevation
+
+	if not ok then
+		context:err((strings.failed or "error: %s"):format(tostring(reason)))
+		return false, nil
+	end
+
+	return true, table.concat(captured, "\n")
+end
+
+function CONTEXT:run(line, noEcho)
+	local trimmed = line:gsub("^%s+", ""):gsub("%s+$", "")
+	if trimmed == "" then return true end
+
+	if not noEcho then
+		appendLine(promptText() .. trimmed, COLOR.dim)
+	end
+
+	-- Split into stages, keeping the operator that follows each one. A redirect
+	-- target is a stage of its own, so `> out.txt` lands in segments too.
+	local segments, operators = {}, {}
+	local current = {}
+
+	for _, token in ipairs(COMMANDS.tokenize(trimmed)) do
+		if OPERATORS[token] then
+			if #current > 0 then
+				segments[#segments + 1] = current
+				current = {}
+			end
+
+			operators[#operators + 1] = token
+		else
+			current[#current + 1] = token
+		end
+	end
+
+	if #current > 0 then segments[#segments + 1] = current end
+	if #segments == 0 then return true end
+
+	local environment = {
+		USER = userName, HOME = paths.user.home, PWD = shell.cwd,
+		SHELL = "/TheanOS", TERM = "theanos-tty",
+	}
+
+	-- ~/.theanrc and saved exports, with the live values taking precedence.
+	for name, value in pairs(state.environment) do
+		environment[name] = value
+	end
+
+	environment.PWD = shell.cwd
+	environment.HOME = paths.user.home
+	environment.USER = userName
+
+	-- Aliases are expanded once, before splitting, so an alias may itself
+	-- contain pipes or redirects.
+	if state.aliases[segments[1][1]] then
+		local expanded = state.aliases[segments[1][1]] .. " " .. table.concat(segments[1], " ", 2)
+
+		return self:run(expanded, true)
+	end
+
+	-- operators[i] is the operator that FOLLOWS segment i, so a redirect consumes
+	-- the segment after it as its target. Getting this backwards made `echo hi > f`
+	-- treat the command itself as the redirect target and try to run `f`.
+	local carried, ok, index = nil, true, 1
+
+	while index <= #segments do
+		local operator = operators[index]
+		local nextOperator = operators[index + 1]
+
+		-- A stage must capture when it feeds another stage or feeds a redirect.
+		local capturing = operator == "|" or operator == ">" or operator == ">>"
+			or nextOperator == ">" or nextOperator == ">>"
+
+		if operator == "&&" and not ok then
+			return false
+		end
+
+		-- This stage is fed by a pipe when the PREVIOUS operator was one. Testing
+		-- its own operator instead meant `cat x | grep a > out` gave grep no stdin,
+		-- because grep's operator is the redirect, not the pipe.
+		local fedByPipe = operators[index - 1] == "|"
+
+		local argv = expand(segments[index], environment)
+		ok, carried = runStage(self, argv, fedByPipe and carried or nil, capturing)
+
+		if operator == "|" then
+			carried = carried or ""
+		elseif operator == ">" or operator == ">>" then
+			local target = expand(segments[index + 1] or {}, environment)[1]
+
+			if target and target ~= "" then
+				local path = self:resolve(target)
+				local previous = (operator == ">>") and filesystem.read(path) or nil
+				local body = (carried or "") .. "\n"
+
+				filesystem.write(path, previous and (previous .. body) or body)
+			end
+
+			carried = nil
+			index = index + 1
+		end
+
+		-- A failed stage ends the chain unless the user asked to carry on.
+		if not ok and (operator == "|" or operator == "&&") then
+			return false
+		end
+
+		index = index + 1
+		environment.PWD = shell.cwd
+	end
+
+	return ok
+end
+
+--------------------------------------------------------------------------------
+-- Tab completion
+--
+-- First token completes command names; later tokens complete paths, and expand a
+-- partial "~" into the home directory first.
+--------------------------------------------------------------------------------
+
+local function pathMatches(fragment)
+	local resolved, prefix = fragment, ""
+
+	if fragment:sub(1, 1) == "~" then
+		prefix = "~"
+		resolved = paths.user.home .. fragment:sub(2)
+	end
+
+	local parent, leaf = resolved:match("^(.*/)([^/]*)$")
+	if not parent then
+		parent, leaf = "", resolved
+	end
+
+	if parent == "" then parent = shell.cwd end
+	parent = filesystem.path(parent)
+
+	if not filesystem.exists(parent) or not filesystem.isDirectory(parent) then
+		return {}
+	end
+
+	local matches = {}
+	for _, name in ipairs(filesystem.list(parent) or {}) do
+		if name:sub(1, #leaf) == leaf then
+			local suffix = filesystem.isDirectory(parent .. name) and "/" or ""
+			matches[#matches + 1] = prefix .. (resolved:match("^(.*/)") or "") .. name .. suffix
+		end
+	end
+
+	return matches
+end
+
+local function complete()
+	local before = shell.input:match("^(.*%S)%s(%S*)$")
+	local fragment = shell.input:match("%s(%S*)$")
+
+	-- No trailing token: completing the word already being typed.
+	if not before or not fragment then
+		fragment = shell.input:match("(%S*)$") or ""
+		before = shell.input:sub(1, #shell.input - #fragment)
+	end
+
+	local matches
+
+	-- First word on the line: a command name.
+	if before == "" or before:match("[|;&<]%s*$") then
+		local names = {}
+		for name in pairs(COMMANDS.commands) do names[#names + 1] = name end
+		for name in pairs(state.aliases) do names[#names + 1] = name end
+		table.sort(names)
+
+		matches = {}
+		for _, name in ipairs(names) do
+			if name:sub(1, #fragment) == fragment then matches[#matches + 1] = name end
+		end
+	else
+		matches = pathMatches(fragment)
+	end
+
+	if #matches == 0 then
+		return
+	elseif #matches == 1 then
+		-- Leave a trailing space only when it is a real file, not a directory
+		-- being continued.
+		local chosen = matches[1]
+		if chosen:sub(-1) == "/" then
+			shell.input = before .. chosen
+		else
+			shell.input = before .. chosen .. " "
+		end
+	else
 		local prefix = matches[1]
 		for i = 2, #matches do
 			while #prefix > 0 and matches[i]:sub(1, #prefix) ~= prefix do
@@ -346,8 +655,24 @@ local function complete()
 			end
 		end
 
-		appendLine(table.concat(matches, "   "), COLOR.dim)
-		shell.input = head .. prefix
+		if #prefix > #fragment then
+			shell.input = before .. prefix
+		end
+
+		-- Offer completions in columns; the path may be long.
+		local width = display.width - 1
+		local column = math.max(10, math.floor(width / 3))
+		local row = {}
+
+		for i = 1, #matches do
+			local name = matches[i]:match("[^/]*$")
+			row[#row + 1] = ("%-*" .. column):format(name)
+
+			if i % 3 == 0 or i == #matches then
+				appendLine(table.concat(row):gsub("%s+$", ""), COLOR.dim)
+				row = {}
+			end
+		end
 	end
 end
 
@@ -379,8 +704,17 @@ window.eventHandler = function(ws, win, ...)
 		if code == 28 then -- return
 			shell.scrollOffset = 0
 			lineFrom = math.max(1, #shell.lines - visibleRows() + 2)
-			shell.history[#shell.history + 1] = shell.input
-			shell.historyIndex = #shell.history + 1
+			-- Skip repeats of the same entry, like a real shell does.
+			if state.history[#state.history] ~= shell.input then
+				state.history[#state.history + 1] = shell.input
+			end
+
+			while #state.history > MAX_HISTORY do
+				table.remove(state.history, 1)
+			end
+
+			shell.historyIndex = #state.history + 1
+			saveState()
 
 			CONTEXT:run(shell.input)
 			shell.input, shell.ephemeral = "", nil
