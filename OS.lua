@@ -215,21 +215,201 @@ event.addHandler(
 	end
 )
 
+--------------------------------------------------------------------------------
+-- Kernel panic
+--
+-- Deliberately avoids the GUI library. The usual reason to land here is a fault
+-- inside GUI.lua or one of its widgets, and a crash screen that depends on the
+-- crashed subsystem cannot report the crash -- the old handler built a
+-- GUI.addBackgroundContainer dialog, so a GUI fault took the reporter down with
+-- it. Everything below talks to the GPU directly, like the boot splash does.
+--------------------------------------------------------------------------------
+
+local PANIC_BACKGROUND = 0x0000AA
+local PANIC_TEXT = 0xFFFFFF
+local PANIC_DIM = 0x55AAAA
+local PANIC_FAULT = 0xFFFF99
+
+local function panicWrite(x, y, color, value)
+	value = tostring(value)
+
+	if y < 1 or y > screenHeight or x > screenWidth then return end
+
+	component.invoke(GPUAddress, "setForeground", color)
+	component.invoke(GPUAddress, "set", x, y, value)
+end
+
+local function panicCentered(y, color, value)
+	value = tostring(value)
+	panicWrite(math.max(1, centrize(#value)), y, color, value)
+end
+
+-- Keeps a value inside the screen; a panic must never itself draw off-screen.
+local function panicFit(value, width)
+	value = tostring(value)
+	width = width or (screenWidth - 4)
+
+	if #value <= width then return value end
+	if width <= 3 then return value:sub(1, math.max(1, width)) end
+
+	return value:sub(1, width - 3) .. "..."
+end
+
+local function panicRow(y, label, value, color)
+	panicWrite(3, y, PANIC_DIM, label)
+	panicWrite(3 + #label + 1, y, color or PANIC_TEXT, panicFit(value))
+end
+
+local function panicUptime(seconds)
+	return ("%d:%02d:%02d"):format(
+		math.floor(seconds / 3600),
+		math.floor(seconds / 60) % 60,
+		math.floor(seconds) % 60
+	)
+end
+
+-- Anything that touches a library goes through pcall: a panic must not become a
+-- second panic while trying to describe the first one.
+local function panicDiagnostics()
+	local info = {}
+
+	local okVersion, data = pcall(function()
+		if filesystem and filesystem.exists and filesystem.exists("/Version.cfg") then
+			return filesystem.readTable("/Version.cfg")
+		end
+	end)
+
+	if okVersion and data and data.version then
+		info[#info + 1] = {"Version", data.version}
+	end
+
+	local okLabel, label = pcall(function()
+		return computer.getComputerLabel and computer.getComputerLabel()
+	end)
+
+	if okLabel and type(label) == "string" then info[#info + 1] = {"Computer", label} end
+
+	local okMemory, memory = pcall(function()
+		return computer.totalMemory()
+	end)
+
+	if okMemory and type(memory) == "number" then
+		info[#info + 1] = {"Memory", ("%.1f MB"):format(memory / 1024 / 1024)}
+	end
+
+	info[#info + 1] = {"Display", screenWidth .. "x" .. screenHeight}
+	info[#info + 1] = {"Uptime", panicUptime(computer.uptime())}
+
+	return info
+end
+
+local function kernelPanic(path, line, traceback)
+	component.invoke(GPUAddress, "setDepth", 8)
+	component.invoke(GPUAddress, "setBackground", PANIC_BACKGROUND)
+	component.invoke(GPUAddress, "fill", 1, 1, screenWidth, screenHeight, " ")
+
+	local moduleName = "unknown"
+	if type(path) == "string" and path ~= "" then
+		moduleName = path:match("[^/]+$") or path
+	end
+
+	-- system.call builds its traceback as the error message, a newline, then the
+	-- stack. Take the first line as the fault and keep the rest as the stack,
+	-- otherwise the message row would spill over the rows below it.
+	local fault, stack = "unknown error", ""
+
+	if type(traceback) == "string" and traceback ~= "" then
+		fault = traceback:match("^[^\n]*") or traceback
+		stack = traceback:sub(#fault + 1):gsub("^\n", "")
+	end
+
+	panicCentered(2, PANIC_TEXT, "THEANOS KERNEL PANIC")
+	panicCentered(3, PANIC_DIM, panicFit("Not syncing: fatal error in " .. moduleName, screenWidth - 2))
+
+	local y = 5
+	panicRow(y, "Fault", fault, PANIC_FAULT); y = y + 1
+	panicRow(y, "Module", moduleName); y = y + 1
+	panicRow(y, "Line", line or "?")
+
+	-- Diagnostics, then the traceback in whatever room is left.
+	y = y + 2
+	for _, entry in ipairs(panicDiagnostics()) do
+		if y > screenHeight - 6 then break end
+		panicRow(y, entry[1], entry[2])
+		y = y + 1
+	end
+
+	local footerTop = screenHeight - 3
+	local traceTop, traceBottom = y + 1, footerTop - 1
+
+	if traceBottom > traceTop and stack ~= "" then
+		local shown = 0
+
+		for piece in (stack .. "\n"):gmatch("(.-)\n") do
+			if shown >= traceBottom - traceTop + 1 then break end
+
+			piece = piece:gsub("^%s+", "")
+			if piece ~= "" then
+				panicWrite(3, traceTop + shown, PANIC_DIM, panicFit(piece))
+				shown = shown + 1
+			end
+		end
+	end
+
+	if footerTop > 0 then
+		panicCentered(footerTop, PANIC_TEXT, "[R] Reboot      [S] Shutdown")
+		panicCentered(footerTop + 1, PANIC_DIM, "Press R to reboot, S to power off")
+	end
+
+	component.invoke(GPUAddress, "setForeground", PANIC_TEXT)
+	component.invoke(GPUAddress, "set", 1, screenHeight, " ")
+
+	-- Raw input, so recovery works even with the GUI out of action.
+	-- Payloads differ per signal: touch carries (x, y), key_down carries
+	-- (type, character, code), so they are read positionally, not by name.
+	while true do
+		local signal, second, third, fourth = computer.pullSignal()
+
+		if signal == "key_down" then
+			if fourth == 28 then return end
+
+			local pressed = type(third) == "number" and unicode.lower(unicode.char(third)) or ""
+
+			if pressed == "r" then
+				computer.shutdown(true)
+				return
+			elseif pressed == "s" then
+				computer.shutdown()
+				return
+			end
+
+		elseif signal == "touch" then
+			-- Upper half reboots, lower half shuts down. third is y here.
+			if type(third) == "number" and third <= math.floor(screenHeight / 2) then
+				computer.shutdown(true)
+			else
+				computer.shutdown()
+			end
+
+			return
+
+		elseif signal == "terminate" then
+			return
+		end
+	end
+end
+
 -- Logging in
 system.authorize()
 
--- Main loop with UI regeneration after errors 
+-- Main loop. A fault ends in the panic screen rather than a rebuilt desktop,
+-- because the fault is regularly inside the code that would do the rebuilding.
 while true do
 	local success, path, line, traceback = system.call(workspace.start, workspace, 0)
-	
+
 	if success then
 		break
-	else
-		system.updateWorkspace()
-		system.updateDesktop()
-		workspace:draw()
-		
-		system.error(path, line, traceback)
-		workspace:draw()
 	end
+
+	kernelPanic(path, line, traceback)
 end
