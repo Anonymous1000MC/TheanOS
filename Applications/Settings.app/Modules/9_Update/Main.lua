@@ -1,5 +1,6 @@
 
 local GUI = require("GUI")
+local event = require("Event")
 local filesystem = require("Filesystem")
 local internet = require("Internet")
 local system = require("System")
@@ -90,8 +91,18 @@ end
 --------------------------------------------------------------------------------
 
 local overlay
+local updateHandler
+
+local function stopUpdate()
+	if updateHandler then
+		event.removeHandler(updateHandler)
+		updateHandler = nil
+	end
+end
 
 local function closeOverlay()
+	stopUpdate()
+
 	if overlay then
 		overlay:remove()
 		overlay = nil
@@ -191,15 +202,27 @@ local function runUpdate(onFinished)
 	box:addChild(GUI.object(1, 1, 1, 1))
 	box:addChild(GUI.text(1, 1, COLOR.text, t("updateNote", "Do not switch off the computer.")))
 
+	box:addChild(GUI.object(1, 1, 1, 1))
+	local cancelButton = box:addChild(GUI.adaptiveRoundedButton(1, 1, 2, 0,
+		0xC3C3C3, 0x878787, 0xA5A5A5, 0x696969, t("cancelUpdate", "Cancel")
+	))
+
 	workspace:draw()
+
+	local cancelled = false
 
 	local function finish(ok, message)
 		closeOverlay()
 		workspace:draw()
 
-		if onFinished then
+		if onFinished and not cancelled then
 			onFinished(ok, message)
 		end
+	end
+
+	cancelButton.onTouch = function()
+		cancelled = true
+		finish(false, t("updateCancelled", "Update cancelled."))
 	end
 
 	-- The manifest is the same one the installer uses, so an update installs
@@ -224,13 +247,19 @@ local function runUpdate(onFinished)
 		return
 	end
 
-	local failed = {}
+	-- Downloading every file in one go would block the workspace loop for
+	-- minutes: no repaint of other windows and no way to cancel. Instead the
+	-- event handler does one file per pull, so input keeps being processed and
+	-- the progress bar keeps moving between files.
+	local failed, index = {}, 1
 
-	for i = 1, #list do
-		local path = list[i]
+	local function step()
+		if index > #list then
+			return true
+		end
 
-		statusText.text = t("installing", "Installing %d/%d: %s"):format(i, #list, filesystem.name(path))
-		workspace:draw()
+		local path = list[index]
+		statusText.text = t("installing", "Installing %d/%d: %s"):format(index, #list, filesystem.name(path))
 
 		local target = "/" .. path
 		local proxy, proxyPath = filesystem.get(target)
@@ -243,18 +272,30 @@ local function runUpdate(onFinished)
 			failed[#failed + 1] = path
 		end
 
-		progressBar.value = math.floor(i / #list * 100)
+		index = index + 1
+		progressBar.value = math.floor((index - 1) / #list * 100)
+
+		return index > #list
+	end
+
+	updateHandler = event.addHandler(function()
+		local done = step()
+
 		workspace:draw()
-	end
 
-	-- Keep the version marker in step with the files we just wrote.
-	internet.download(REMOTE_VERSION_URL, LOCAL_VERSION_PATH)
+		if done then
+			-- Keep the version marker in step with the files we just wrote.
+			internet.download(REMOTE_VERSION_URL, LOCAL_VERSION_PATH)
 
-	if #failed == 0 then
-		finish(true, t("updateDone", "The system has been updated."))
-	else
-		finish(false, t("updatePartial", "Updated with %d error(s). Check the connection and try again."):format(#failed))
-	end
+			if #failed == 0 then
+				finish(true, t("updateDone", "The system has been updated."))
+			else
+				finish(false, t("updatePartial", "Updated with %d error(s). Check the connection and try again."):format(#failed))
+			end
+		end
+	end)
+
+	workspace:draw()
 end
 
 --------------------------------------------------------------------------------
