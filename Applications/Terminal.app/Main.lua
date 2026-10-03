@@ -41,11 +41,13 @@ COMMANDS.COLOR = COLOR
 -- Shell state
 --------------------------------------------------------------------------------
 
+-- Declared up front because appendLine advances it to follow new output.
+local lineFrom = 1
+
 local shell = {
 	cwd = "/",
 	lines = {},
 	input = "",
-	lineFrom = 1,
 	history = {},
 	historyIndex = 0,
 	scrollOffset = 0,
@@ -85,14 +87,44 @@ local display = window:addChild(GUI.object(2, 4, 1, 1))
 -- Output helpers
 --------------------------------------------------------------------------------
 
+-- Rows available for output. One row is reserved for the prompt.
 local function visibleRows()
-	return math.max(1, display.height - 2)
+	return math.max(1, display.height - 1)
+end
+
+-- Keeps the newest line inside the viewport by advancing lineFrom, and caps the
+-- scrollback so a chatty command cannot exhaust memory on a small computer.
+local MAX_SCROLLBACK = 1500
+
+local function trimScrollback()
+	local excess = #shell.lines - MAX_SCROLLBACK
+
+	if excess > 0 then
+		for i = 1, excess do
+			shell.lines[i] = nil
+		end
+
+		lineFrom = math.max(1, lineFrom - excess)
+		shell.scrollOffset = math.max(0, shell.scrollOffset - excess)
+	end
 end
 
 local function appendLine(value, color)
-	for _, wrapped in ipairs(text.wrap(tostring(value), display.width)) do
-		shell.lines[#shell.lines + 1] = {text = wrapped, color = color or COLOR.text}
+	local wrapped = text.wrap(tostring(value), display.width)
+
+	for i = 1, #wrapped do
+		shell.lines[#shell.lines + 1] = {text = wrapped[i], color = color or COLOR.text}
 	end
+
+	-- follow the tail unless the user has scrolled back
+	if shell.scrollOffset == 0 then
+		local overflow = #shell.lines - lineFrom + 1 - visibleRows()
+		if overflow > 0 then
+			lineFrom = lineFrom + overflow
+		end
+	end
+
+	trimScrollback()
 end
 
 function shell.out(value, color)
@@ -108,11 +140,12 @@ function shell.warn(value)
 end
 
 function shell.clear()
-	shell.lines, shell.lineFrom, shell.scrollOffset = {}, 1, 0
+	shell.lines, shell.scrollOffset = {}, 0
+	lineFrom = 1
 end
 
 function shell.terminate()
-	shell.exit = true
+	window:remove()
 end
 
 --------------------------------------------------------------------------------
@@ -142,10 +175,10 @@ display.draw = function()
 	local x, originY = display.x, display.y
 	local y = originY
 
-	local first = math.max(1, shell.lineFrom - shell.scrollOffset)
-	local last = math.min(#shell.lines, first + visibleRows() - 2)
+	local first = math.max(1, math.min(lineFrom, #shell.lines + 1)) - shell.scrollOffset
+	local last = math.min(#shell.lines, first + visibleRows() - 1)
 
-	for i = first, last do
+	for i = math.max(1, first), last do
 		local line = shell.lines[i]
 		screen.drawText(x, y, line.color, line.text)
 		y = y + 1
@@ -297,6 +330,13 @@ window.eventHandler = function(ws, win, ...)
 	if e[1] == "scroll" then
 		local maximum = math.max(0, #shell.lines - visibleRows() + 1)
 		shell.scrollOffset = math.max(0, math.min(maximum, shell.scrollOffset + (e[5] > 0 and -1 or 1)))
+
+		-- Returning to the bottom re-anchors on the newest line, because output
+		-- produced while scrolled up left lineFrom where it was.
+		if shell.scrollOffset == 0 then
+			lineFrom = math.max(1, #shell.lines - visibleRows() + 1)
+		end
+
 		handled = true
 
 	elseif e[1] == "key_down" and ws.focusedObject == win then
@@ -304,6 +344,7 @@ window.eventHandler = function(ws, win, ...)
 
 		if code == 28 then -- return
 			shell.scrollOffset = 0
+			lineFrom = math.max(1, #shell.lines - visibleRows() + 2)
 			shell.history[#shell.history + 1] = shell.input
 			shell.historyIndex = #shell.history + 1
 
