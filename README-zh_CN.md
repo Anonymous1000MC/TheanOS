@@ -1,7 +1,7 @@
 
 [English](https://github.com/Anonymous1000MC/TheanOS/) | 中文(简体) | [Русский](https://github.com/Anonymous1000MC/TheanOS/blob/master/README-ru_RU.md)
 
-## MineOS独立版现已发布!
+## TheanOS独立版现已发布!
 
 你好，亲爱的朋友。感谢你在漫长的开发周期中与我们并肩同行。MineOS终于到了发布阶段：现在它是一个完全独立的操作系统，拥有自己的开发API和一个讲解了使用方法且[图文并茂的维基](https://github.com/IgorTimofeev/MineOS/wiki).
 MineOS是一个拥有GUI的操作系统，运行在Minecraft模组Open Computers上。它有广泛而强大的定制能力，以及一个能让你在社区中发布你的作品的<del>应用程序市场</del>（目前离线）。下面是它的特性的列表:
