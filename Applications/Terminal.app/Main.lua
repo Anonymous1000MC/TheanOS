@@ -149,10 +149,10 @@ end
 -- leading/trailing spaces, which destroys any column-aligned output such as the
 -- fastfetch logo.
 local function appendRawLine(value, color)
-	local lines = tostring(value):gsub("\r", ""):gsub("\n", " \n ")
+	value = tostring(value):gsub("\r", "")
 
-	for piece in lines:gmatch("(.-) \n ") do
-		shell.lines[#shell.lines + 1] = {text = piece, color = color or COLOR.text}
+	for line in (value .. "\n"):gmatch("(.-)\n") do
+		shell.lines[#shell.lines + 1] = {text = line, color = color or COLOR.text}
 	end
 end
 

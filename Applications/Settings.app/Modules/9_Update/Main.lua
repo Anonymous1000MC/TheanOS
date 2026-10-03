@@ -113,11 +113,17 @@ end
 -- Returns the inner layout, which is where children have to be added.
 -- `dismissible` keeps addBackgroundContainer's click-to-close panel handler; the
 -- progress overlay must not be dismissable or a stray touch would abort it.
-local function openOverlay(title, dismissible)
+local function openOverlay(title, dismissible, opaque)
 	closeOverlay()
 
 	overlay = workspace:addChild(GUI.container(1, 1, workspace.width, workspace.height))
 	overlay.blockScreenEvents = true
+
+	if opaque then
+		-- addBackgroundContainer's own backdrop is 30% transparent, so without
+		-- this the desktop shows through the updater
+		overlay:addChild(GUI.panel(1, 1, overlay.width, overlay.height, 0x000000))
+	end
 
 	local container = GUI.addBackgroundContainer(overlay, true, true, title)
 
@@ -192,7 +198,7 @@ end
 --------------------------------------------------------------------------------
 
 local function runUpdate(onFinished)
-	local box = openOverlay(t("updating", "Updating System"), false)
+	local box = openOverlay(t("updating", "Updating System"), false, true)
 
 	local statusText = box:addChild(GUI.text(1, 1, COLOR.text, t("preparing", "Preparing...")))
 	box:addChild(GUI.object(1, 1, 1, 1))
@@ -278,10 +284,20 @@ local function runUpdate(onFinished)
 		return index > #list
 	end
 
+	-- Each workspace:draw() repaints the entire desktop, including the blurred
+	-- panel the Settings window uses, so doing it per file stutters badly. The
+	-- handler still runs every pull; only the repaint is rate limited.
+	local lastDraw = 0
+	local REDRAW_INTERVAL = 0.35
+
 	updateHandler = event.addHandler(function()
 		local done = step()
 
-		workspace:draw()
+		local now = computer.uptime()
+		if done or (now - lastDraw) >= REDRAW_INTERVAL then
+			lastDraw = now
+			workspace:draw()
+		end
 
 		if done then
 			-- Keep the version marker in step with the files we just wrote.
