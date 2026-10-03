@@ -1,0 +1,66 @@
+{
+	terminal = "TheanOS Terminal",
+	banner = "TheanOS terminal -- type 'help' for commands, 'fastfetch' for a summary.",
+	notFound = "thean: %s: command not found",
+	tryHelp = "Type 'help' for the command list.",
+	failed = "error: %s",
+
+	noIndex = "no package index cached -- run 'tpkg update' first",
+	badIndex = "cached package index is corrupt -- run 'tpkg update'",
+
+	groupFiles = "Files",
+	groupText = "Text",
+	groupSystem = "System",
+	groupTheanOS = "TheanOS",
+	groupShell = "Shell",
+
+	helpDesc = "list commands, or explain one",
+	manDesc = "show the manual page for a command",
+	clearDesc = "clear the screen",
+	echoDesc = "print text",
+	exitDesc = "close the terminal",
+	sleepDesc = "wait for a number of seconds",
+
+	pwdDesc = "print the working directory",
+	cdDesc = "change the working directory",
+	lsDesc = "list directory contents",
+	treeDesc = "show a directory tree",
+	findDesc = "find entries matching a name",
+
+	catDesc = "print the contents of a file",
+	mkdirDesc = "create directories",
+	touchDesc = "create empty files",
+	rmDesc = "remove files or directories",
+	rmdirDesc = "remove empty directories",
+	cpDesc = "copy a file",
+	mvDesc = "move or rename a file",
+
+	grepDesc = "search for a pattern inside files",
+	wcDesc = "count lines, words and characters",
+	headDesc = "print the first lines of a file",
+	tailDesc = "print the last lines of a file",
+
+	dfDesc = "report filesystem usage",
+	duDesc = "show how much space a directory uses",
+	dateDesc = "print the current date and time",
+	uptimeDesc = "show how long the system has been running",
+	whoamiDesc = "print the current user",
+	hostnameDesc = "print the computer label",
+	unameDesc = "print system information",
+	envDesc = "print the environment",
+	whichDesc = "show where a command lives",
+	historyDesc = "show recent commands",
+	psDesc = "list installed applications",
+	killDesc = "close an installed application",
+
+	fastfetchDesc = "show a summary of this system",
+	neofetchDesc = "alias for fastfetch",
+	rebootDesc = "restart the computer",
+	shutdownDesc = "power the computer off",
+
+	sudoDesc = "run a command with elevated privileges",
+	tpkgDesc = "install and remove packages",
+
+	confirmReboot = "Reboot the computer?",
+	confirmShutdown = "Shut the computer down?",
+}
