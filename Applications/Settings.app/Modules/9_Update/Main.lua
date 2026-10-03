@@ -9,10 +9,18 @@ local module = {}
 
 local workspace, window, localization = table.unpack({...})
 
--- This module is newer than the shipped translations, so every string falls back
--- to English instead of showing nil.
+-- system.getLocalization tags any key it does not have as "$" .. key, so a plain
+-- `localization.x or "fallback"` renders "$x" instead of the fallback. This
+-- module is newer than the shipped translations, so that would hit every
+-- string here; compare against the sentinel to fall back properly.
 local function t(key, fallback)
-	return localization[key] or fallback
+	local value = localization[key]
+
+	if type(value) ~= "string" or value == "$" .. key then
+		return fallback
+	end
+
+	return value
 end
 
 module.name = t("systemUpdate", "System update")
@@ -252,7 +260,7 @@ end
 
 --------------------------------------------------------------------------------
 
-local currentLabel, latestLabel, statusText
+local installedLabel, latestLabel, releaseLabel, notesLabel, statusText
 local updateButton
 
 local function setStatus(value, color)
@@ -281,8 +289,13 @@ local function checkForUpdates()
 
 	local installed = readLocalVersion()
 
-	currentLabel.text = t("installedVersion", "Installed version: %s"):format(installed or t("unknown", "unknown"))
-	latestLabel.text = t("latestVersion", "Latest version: %s"):format(remote.version)
+	installedLabel.text = installed or t("unknown", "unknown")
+	latestLabel.text = remote.version
+	latestLabel.color = (not installed or isNewerThan(remote.version, installed)) and COLOR.accent or COLOR.heading
+
+	releaseLabel.text = remote.released
+		.. (remote.channel and ("  (" .. remote.channel .. ")") or "")
+	notesLabel.text = remote.notes or "-"
 
 	if not installed then
 		setStatus(t("noVersionMarker", "No version marker found. Installing the latest version is safe."), COLOR.warn)
@@ -329,10 +342,25 @@ end
 module.onTouch = function()
 	closeOverlay()
 
-	currentLabel = window.contentLayout:addChild(GUI.text(1, 1, COLOR.heading, t("installedVersion", "Installed version: %s"):format(
-		readLocalVersion() or t("unknown", "unknown")
-	)))
-	latestLabel = window.contentLayout:addChild(GUI.text(1, 1, COLOR.heading, t("latestVersion", "Latest version: %s"):format(t("unknown", "unknown"))))
+	window.contentLayout:addChild(GUI.text(1, 1, COLOR.heading, t("updateHeading", "System update")))
+
+	local installed = readLocalVersion()
+
+	-- Version card. Children go on the container so the panel sits behind them.
+	local card = window.contentLayout:addChild(GUI.container(1, 1, 44, 8))
+	card:addChild(GUI.panel(1, 1, card.width, card.height, 0xEAEAEA))
+
+	card:addChild(GUI.label(2, 1, 20, 1, 0x7A7A7A, t("labelInstalled", "Installed")))
+	installedLabel = card:addChild(GUI.label(13, 1, 14, 1, COLOR.heading, installed or t("unknown", "unknown")))
+
+	card:addChild(GUI.label(2, 2, 20, 1, 0x7A7A7A, t("labelLatest", "Latest")))
+	latestLabel = card:addChild(GUI.label(13, 2, 14, 1, COLOR.heading, t("unknown", "unknown")))
+
+	card:addChild(GUI.label(2, 3, 20, 1, 0x7A7A7A, t("labelReleased", "Released")))
+	releaseLabel = card:addChild(GUI.label(13, 3, 29, 1, COLOR.text, "-"))
+
+	card:addChild(GUI.label(2, 5, 20, 1, 0x7A7A7A, t("labelChanges", "Changes")))
+	notesLabel = card:addChild(GUI.label(2, 6, 41, 1, COLOR.text, "-"))
 
 	window.contentLayout:addChild(GUI.object(1, 1, 1, 1))
 	statusText = window.contentLayout:addChild(GUI.text(1, 1, COLOR.text, t("checkFirst", "Press the button to look for updates.")))

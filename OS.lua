@@ -100,70 +100,26 @@ local screenWidth, screenHeight = component.invoke(GPUAddress, "getResolution")
 -- Displays title and currently required library when booting OS
 local UIRequireTotal, UIRequireCounter = 14, 1
 
--- Boot splash: a block "T" slides to the left while "heanOS" is revealed after
--- it, over a black background with a white progress bar.
--- Deliberately cheap: the whole splash is 6 rows tall and is redrawn once per
--- library load (14 frames), because the VM is throttled and cooperative.
-local BOOT_STEPS = UIRequireTotal
-local bootStep = 0
-
-local LOGO_HEIGHT = 3
-local BAR_WIDTH = 34
-local LETTERS = "heanOS"
-
 local function centrize(width)
 	return math.floor(screenWidth / 2 - width / 2)
 end
 
-local function drawBootSplash(step)
-	step = math.min(step, BOOT_STEPS)
+local function UIRequire(module)
+	local title, width = "TheanOS", 26
+	local x, y = centrize(width), math.floor(screenHeight / 2 - 1)
+	local part = math.ceil(width * UIRequireCounter / UIRequireTotal)
+	UIRequireCounter = UIRequireCounter + 1
 
-	local bandTop = math.max(1, math.floor(screenHeight / 2) - 2)
-	local bandHeight = LOGO_HEIGHT + 3
-
-	-- black background, painted once
-	if step == 1 then
-		component.invoke(GPUAddress, "setDepth", 8)
-		component.invoke(GPUAddress, "setBackground", 0x000000)
-		component.invoke(GPUAddress, "fill", 1, 1, screenWidth, screenHeight, " ")
-	end
-
-	-- clear only the animated band, not the whole screen
-	component.invoke(GPUAddress, "fill", 1, bandTop, screenWidth, bandHeight, " ")
-
-	-- the T travels left over the first few frames, then parks
-	local finalX = math.max(2, centrize(24) - 2)
-	local startX = math.min(screenWidth - 6, finalX + 16)
-	local travel = math.min(step, 5)
-	local tX = startX - math.floor((startX - finalX) * (travel - 1) / 4)
-
+	-- Title. White, because the background is black.
 	component.invoke(GPUAddress, "setForeground", 0xFFFFFF)
+	component.invoke(GPUAddress, "set", centrize(#title), y, title)
 
-	-- block T
-	component.invoke(GPUAddress, "set", tX, bandTop, "███")
-	component.invoke(GPUAddress, "set", tX + 1, bandTop + 1, " █ ")
-	component.invoke(GPUAddress, "set", tX + 1, bandTop + 2, " █ ")
-
-	-- "heanOS" is revealed one character per frame once the T has parked
-	local revealed = math.min(#LETTERS, math.max(0, step - 5))
-	if revealed > 0 then
-		component.invoke(GPUAddress, "set", tX + 4, bandTop + 1, LETTERS:sub(1, revealed))
-	end
-
-	-- white progress bar underneath
-	local barX, barY = centrize(BAR_WIDTH), bandTop + LOGO_HEIGHT + 1
-	local done = math.ceil(BAR_WIDTH * step / BOOT_STEPS)
-
+	-- Progressbar: white for the part already loaded, dim grey for the rest.
 	component.invoke(GPUAddress, "setForeground", 0xFFFFFF)
-	component.invoke(GPUAddress, "set", barX, barY, string.rep("█", done))
+	component.invoke(GPUAddress, "set", x, y + 2, string.rep("─", part))
 
 	component.invoke(GPUAddress, "setForeground", 0x3A3A3A)
-	component.invoke(GPUAddress, "set", barX + done, barY, string.rep("█", BAR_WIDTH - done))
-end
-
-local function UIRequire(module)
-	UIRequireCounter = UIRequireCounter + 1
-	drawBootSplash(UIRequireCounter)
+	component.invoke(GPUAddress, "set", x + part, y + 2, string.rep("─", width - part))
 
 	return require(module)
 end

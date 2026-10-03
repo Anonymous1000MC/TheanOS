@@ -33,9 +33,27 @@ local COLOR = {
 -- Command set lives next to this file
 --------------------------------------------------------------------------------
 
-local COMMANDS = assert(loadfile(currentScriptDirectory .. "Commands.lua"))()
-COMMANDS.localization = localization
-COMMANDS.COLOR = COLOR
+-- system.getLocalization tags every key it does not have as "$" .. key, so a
+-- plain `localization.x or "fallback"` never actually falls back -- it renders
+-- "$x". Read through this view instead, which hides the sentinel.
+local function localizationValue(key)
+	local value = localization[key]
+
+	if type(value) ~= "string" or value == "$" .. key then
+		return nil
+	end
+
+	return value
+end
+
+-- __index is called as (table, key), so the lookup takes both.
+local strings = setmetatable({}, {__index = function(_, key)
+	return localizationValue(key)
+end})
+
+-- Passed as varargs: Commands.lua binds them at load time, so assigning them
+-- after the call would be too late.
+local COMMANDS = assert(loadfile(currentScriptDirectory .. "Commands.lua"))(strings, COLOR)
 
 --------------------------------------------------------------------------------
 -- Shell state
@@ -76,7 +94,7 @@ end
 local workspace, window = system.addWindow(GUI.filledWindow(1, 1, 82, 26, 0x000000))
 
 window.titleLabel = window:addChild(
-	GUI.label(1, 1, window.width, 1, COLOR.dim, " " .. (localization.terminal or "Terminal"))
+	GUI.label(1, 1, window.width, 1, COLOR.dim, " " .. (strings.terminal or "Terminal"))
 ):setAlignment(GUI.ALIGNMENT_HORIZONTAL_CENTER, GUI.ALIGNMENT_VERTICAL_TOP)
 
 window.actionButtons.localY = 1
@@ -266,8 +284,8 @@ function CONTEXT:run(line)
 
 	local command = COMMANDS.commands[name] or COMMANDS.commands[name:lower()]
 	if not command then
-		self:err((localization.notFound or "tpkg: %s: command not found"):format(name))
-		self:dim(localization.tryHelp or "Type 'help' for the command list.")
+		self:err((strings.notFound or "tpkg: %s: command not found"):format(name))
+		self:dim(strings.tryHelp or "Type 'help' for the command list.")
 		return
 	end
 
@@ -277,7 +295,7 @@ function CONTEXT:run(line)
 	shell.elevated = previousElevation
 
 	if not ok then
-		self:err((localization.failed or "error: %s"):format(tostring(reason)))
+		self:err((strings.failed or "error: %s"):format(tostring(reason)))
 	end
 end
 
@@ -410,7 +428,7 @@ end
 
 window.onResize(window.width, window.height)
 
-appendLine(localization.banner or "TheanOS terminal -- type 'help' for commands.", COLOR.heading)
+appendLine(strings.banner or "TheanOS terminal -- type 'help' for commands.", COLOR.heading)
 appendLine("")
 
 workspace:draw()

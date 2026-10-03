@@ -3,11 +3,14 @@
 
 local Commands = {}
 
-Commands.localization = Commands.localization or {}
-Commands.COLOR = Commands.COLOR or {}
+-- Injected by Main.lua as chunk varargs.
+local injectedLocalization, injectedColor = ...
 
-local localization = Commands.localization
-local COLOR = Commands.COLOR
+local localization = injectedLocalization or {}
+local COLOR = injectedColor or {}
+
+Commands.localization = localization
+Commands.COLOR = COLOR
 
 local filesystem = require("Filesystem")
 local internet = require("Internet")
@@ -1050,14 +1053,15 @@ commands.kill = {
 -- TheanOS specific
 --------------------------------------------------------------------------------
 
+-- Block "T", matching the letterform used by the boot splash.
 local function asciiLogo()
 	return {
-		"███████╗",
-		"██╔════╝",
-		"███████╗",
-		"╚════██║",
-		"███████║",
-		"╚══════╝",
+		"███████",
+		"███████",
+		"  ███  ",
+		"  ███  ",
+		"  ███  ",
+		"  ███  ",
 	}
 end
 
