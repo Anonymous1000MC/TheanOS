@@ -18,6 +18,6 @@
 	flashing = "Flashovanie EEPROM...",
 	creating = "Vytváranie profilu používateľa...",
 	installing = "Inštalovanie",
-	installed = "MineOS sa nainštaloval. Užite si!",
+	installed = "TheanOS sa nainštaloval. Užite si!",
 	reboot = "Reštartovať",
 }

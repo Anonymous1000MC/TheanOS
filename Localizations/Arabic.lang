@@ -66,7 +66,7 @@
 	newFile = "ملف",
 	newFileFromURL = "ملف من URL",
 	newImage = "صورة",
-	newApplication = "تطبيق MineOS",
+	newApplication = "تطبيق TheanOS",
 	paste = "لصق",
 	copy = "نسخ",
 	cut = "قص",

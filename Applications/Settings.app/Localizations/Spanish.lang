@@ -48,7 +48,7 @@
 	users = "Usuarios",
 	
 	localizations = "Lenguajes",
-	localizationsInfo = "Quieres mas packs de lenguajes? Envia una solicitud al repositorio de github de MineOS",
+	localizationsInfo = "Quieres mas packs de lenguajes? Envia una solicitud al repositorio de github de TheanOS",
 	
 	time = "Fecha y hora",
 	timeFormat = "Formato de la fecha",

@@ -184,7 +184,7 @@
 		gift = "贈り物",
 		audio_message = "オーディオ",
 	},
-	sentFromMineOS = "（MineOS VKクライアント経由で送信）",
+	sentFromMineOS = "（TheanOS VKクライアント経由で送信）",
 	
 	documents = "ドキュメント",
 	documentsCount = "総文書数",

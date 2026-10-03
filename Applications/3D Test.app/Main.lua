@@ -13,7 +13,7 @@ local meowEngine = require("MeowEngine/Main")
 
 ---------------------------------------------- Anus preparing ----------------------------------------------
 
--- /MineOS/Desktop/3DTest.app/3DTest.lua
+-- /TheanOS/Desktop/3DTest.app/3DTest.lua
 
 screen.flush()
 meowEngine.intro(vector.newVector3(0, 0, 0), 20)

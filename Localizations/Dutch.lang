@@ -66,7 +66,7 @@
 	newFile = "Bestand",
 	newFileFromURL = "Bestand van URL",
 	newImage = "Foto",
-	newApplication = "MineOS applicatie",
+	newApplication = "TheanOS applicatie",
 	paste = "Plakken",
 	copy = "Kopiëren",
 	cut = "Knippen",

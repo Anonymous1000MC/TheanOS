@@ -48,7 +48,7 @@
 	users = "用户",
 	
 	localizations = "语言",
-	localizationsInfo = "你想要更多的语言包吗? 请向GitHub上的MineOS仓库发起pr请求",
+	localizationsInfo = "你想要更多的语言包吗? 请向GitHub上的TheanOS仓库发起pr请求",
 	
 	time = "日期和时间",
 	timeFormat = "日期格式",
@@ -67,8 +67,8 @@
 	
 	tasks = "开机自启",
 	tasksInfo = "您可以添加任意数量的脚本, 以便在指定的时间按顺序自动执行它们.",
-	tasksBefore = "在启动MineOS之前运行",
-	tasksAfter = "启动MineOS之后运行",
+	tasksBefore = "在启动TheanOS之前运行",
+	tasksAfter = "启动TheanOS之后运行",
 	tasksPath = "脚本路径",
 	tasksEnabled = "脚本已启用",
 	

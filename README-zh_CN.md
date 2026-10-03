@@ -3,8 +3,8 @@
 
 ## TheanOS独立版现已发布!
 
-你好，亲爱的朋友。感谢你在漫长的开发周期中与我们并肩同行。MineOS终于到了发布阶段：现在它是一个完全独立的操作系统，拥有自己的开发API和一个讲解了使用方法且[图文并茂的维基](https://github.com/IgorTimofeev/MineOS/wiki).
-MineOS是一个拥有GUI的操作系统，运行在Minecraft模组Open Computers上。它有广泛而强大的定制能力，以及一个能让你在社区中发布你的作品的<del>应用程序市场</del>（目前离线）。下面是它的特性的列表:
+你好，亲爱的朋友。感谢你在漫长的开发周期中与我们并肩同行。TheanOS终于到了发布阶段：现在它是一个完全独立的操作系统，拥有自己的开发API和一个讲解了使用方法且[图文并茂的维基](https://github.com/IgorTimofeev/MineOS/wiki).
+TheanOS是一个拥有GUI的操作系统，运行在Minecraft模组Open Computers上。它有广泛而强大的定制能力，以及一个能让你在社区中发布你的作品的<del>应用程序市场</del>（目前离线）。下面是它的特性的列表:
 -   多任务处理
 -   双缓冲图形用户界面
 -   语言包和软件本地化
@@ -13,14 +13,14 @@ MineOS是一个拥有GUI的操作系统，运行在Minecraft模组Open Computers
 -   通过调制解调器在本地网络上共享文件
 -   可连接到现实FTP服务器的客户端
 -   具有语法高亮显示和调试器的内置IDE
--   <del>能够让每一个MineOS用户发布应用程序的应用市场</del>
+-   <del>能够让每一个TheanOS用户发布应用程序的应用市场</del>
 -   错误报告系统，可向开发人员发送错误信息
 -   动画、壁纸、屏幕保护程序、配色方案和巨大的定制空间
 -   开源的系统API和详细的说明文档
 
 ## 如何安装?
 
-最简单的方式是使用默认的`pastebin`脚本。插入一个OpenOS的软盘到计算机当中，再插入一个Internet卡，启动电脑并在控制台中输入下列命令以安装MineOS：
+最简单的方式是使用默认的`pastebin`脚本。插入一个OpenOS的软盘到计算机当中，再插入一个Internet卡，启动电脑并在控制台中输入下列命令以安装TheanOS：
 
 	pastebin run PDE3eVsL
 

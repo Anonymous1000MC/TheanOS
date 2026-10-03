@@ -5,7 +5,7 @@ local system = require("System")
 
 ---------------------------------------------------------------------------------
 
--- Add a new window to MineOS workspace
+-- Add a new window to TheanOS workspace
 local workspace, window, menu = system.addWindow(GUI.filledWindow(1, 1, 60, 20, 0xE1E1E1))
 
 -- Get localization table dependent of current system language
@@ -17,7 +17,7 @@ local layout = window:addChild(GUI.layout(1, 1, window.width, window.height, 1, 
 -- Add nice gray text object to layout
 layout:addChild(GUI.text(1, 1, 0x4B4B4B, localization.greeting .. system.getUser()))
 
--- Customize MineOS menu for this application by your will
+-- Customize TheanOS menu for this application by your will
 local contextMenu = menu:addContextMenuItem("File")
 contextMenu:addItem("New")
 contextMenu:addSeparator()

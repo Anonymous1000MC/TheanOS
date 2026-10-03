@@ -18,6 +18,6 @@
 	flashing = "Flashe EEPROM...",
 	creating = "Erstellen eines Benutzerprofils...",
 	installing = "Installieren",
-	installed = "MineOS wurde installiert",
+	installed = "TheanOS wurde installiert",
 	reboot = "Neustart",
 }

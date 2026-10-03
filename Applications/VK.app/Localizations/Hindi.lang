@@ -184,7 +184,7 @@
 		gift = "उपहार",
 		audio_message = "ऑडियो",
 	},
-	sentFromMineOS = "(माइनओएस वीके क्लाइंट के माध्यम से भेजा गया)",
+	sentFromMineOS = "(TheanOS वीके क्लाइंट के माध्यम से भेजा गया)",
 	
 	documents = "दस्तावेज़",
 	documentsCount = "कुल दस्तावेज",

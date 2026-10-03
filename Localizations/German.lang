@@ -66,7 +66,7 @@
 	newFile = "Datei",
 	newFileFromURL = "Datei von Netzwerkpfad",
 	newImage = "Bild",
-	newApplication = "MineOS Anwendung",
+	newApplication = "TheanOS Anwendung",
 	paste = "Einfügen",
 	copy = "Kopieren",
 	cut = "Ausschneiden",

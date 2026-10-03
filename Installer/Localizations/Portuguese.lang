@@ -18,6 +18,6 @@
 	flashing = "EEPROM piscando ...",
 	creating = "Criando perfil de usuário ...",
 	installing = "Instalando",
-	installed = "O MineOS foi instalado. Aproveite!",
+	installed = "O TheanOS foi instalado. Aproveite!",
 	reboot = "Reinicie o computador"
 }

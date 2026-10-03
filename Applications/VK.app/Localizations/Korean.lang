@@ -184,7 +184,7 @@
 		gift = "선물",
 		audio_message = "오디오",
 	},
-	sentFromMineOS = "(MineOS VK 클라이언트를 통해 전송)",
+	sentFromMineOS = "(TheanOS VK 클라이언트를 통해 전송)",
 	
 	documents = "서류",
 	documentsCount = "총 문서",

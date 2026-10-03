@@ -18,6 +18,6 @@
 	flashing = "وميض EEPROM ...",
 	creating = "إنشاء ملف تعريف المستخدم ...",
 	installing = "التثبيت",
-	installed = "تم استخدام MineOS المثبتة. استمتع",
+	installed = "تم استخدام TheanOS المثبتة. استمتع",
 	reboot = "أعد تشغيل الكمبيوتر"
 }

@@ -18,6 +18,6 @@
 	flashing = "EEPROM lampeggiante...",
 	creating = "Creazione del profilo utente...",
 	installing = "Installazione",
-	installed = "MineOS è stato installato. Buon divertivento!",
+	installed = "TheanOS è stato installato. Buon divertivento!",
 	reboot = "Riavvia",
 }

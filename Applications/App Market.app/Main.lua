@@ -1898,7 +1898,7 @@ editPublication = function(initialPublication, initialCategoryID)
 		dependencyTypeComboBox:addItem(localization.previewDepencency)
 		dependencyTypeComboBox.selectedItem = lastDependencyType
 
-		local publicationNameInput = container.layout:addChild(GUI.input(1, 1, 36, 3, 0xFFFFFF, 0x696969, 0xB4B4B4, 0xFFFFFF, 0x2D2D2D, "", "MineOS"))
+		local publicationNameInput = container.layout:addChild(GUI.input(1, 1, 36, 3, 0xFFFFFF, 0x696969, 0xB4B4B4, 0xFFFFFF, 0x2D2D2D, "", "TheanOS"))
 		local urlInput = container.layout:addChild(GUI.input(1, 1, 36, 3, 0xFFFFFF, 0x696969, 0xB4B4B4, 0xFFFFFF, 0x2D2D2D, "", ""))
 		local pathInput = container.layout:addChild(GUI.input(1, 1, 36, 3, 0xFFFFFF, 0x696969, 0xB4B4B4, 0xFFFFFF, 0x2D2D2D, "", ""))
 		local pathType = container.layout:addChild(GUI.switchAndLabel(1, 1, 36, 6, 0x66DB80, 0x0, 0xE1E1E1, 0x878787, localization.relativePath .. ":", true))

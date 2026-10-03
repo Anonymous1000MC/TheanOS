@@ -10,7 +10,7 @@
 	applications = "서드파티 앱:",
 	languages = "언어 패키지:",
 	accept = "약관에 동의합니다 :",
-	select = "MineOS를 설치할 디스크를 선택하세요.",
+	select = "TheanOS를 설치할 디스크를 선택하세요.",
 	erase = "지우기",
 	used = "사용됨",
 	setup = "사용자 계정 설정하기",
@@ -18,6 +18,6 @@
 	flashing = "EEPROM 플래시중",
 	creating = "사용자 계정 생성중",
 	installing = "설치중",
-	installed = "MineOS가 설치되었습니다.",
+	installed = "TheanOS가 설치되었습니다.",
 	reboot = "컴푸터 재시동",
 }

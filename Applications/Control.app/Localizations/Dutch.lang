@@ -17,7 +17,7 @@
 	luaInfo = {
 		{color = 0x880000, text = _G._VERSION .. " Copyright (C) 1994-2017 Lua.org, PUC-Rio"},
 		"Typ een verklaring en druk op Enter om deze te evalueren",
-		"Voorvoegsel een uitdrukking met \ "= \" om de waarde ervan weer te geven",
+		"Voorvoegsel een uitdrukking met \"=\" om de waarde ervan weer te geven",
 		" "
 	},
 	luaType = "Typ hier een verklaring"

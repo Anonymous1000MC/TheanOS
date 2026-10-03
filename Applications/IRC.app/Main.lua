@@ -625,7 +625,7 @@ chat.eventHandler = function(workspace, chat, e1, e2, e3, e4, e5)
 									if ctcp then
 										local command, data = ctcp:match("^([^%s]+)%s(.+)")
 										if ctcp == "VERSION" then
-											sendMessage(username, "VERSION MineOS IRC Client / OpenComputers (Lua 5.3)", true, true)
+											sendMessage(username, "VERSION TheanOS IRC Client / OpenComputers (Lua 5.3)", true, true)
 										elseif ctcp == "TIME" then
 											sendMessage(username, "TIME " .. os.date(system.getTime()), true, true)
 										elseif command == "PING" then

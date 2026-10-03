@@ -184,7 +184,7 @@
 		gift = "lahja",
 		audio_message = "audio-",
 	},
-	sentFromMineOS = "(Lähetetty MineOS VK Clientin kautta)",
+	sentFromMineOS = "(Lähetetty TheanOS VK Clientin kautta)",
 	
 	documents = "Asiakirjat",
 	documentsCount = "Asiakirjoja yhteensä",

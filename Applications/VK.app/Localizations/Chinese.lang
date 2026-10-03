@@ -184,7 +184,7 @@
 		gift = "礼物",
 		audio_message = "声音的",
 	},
-	sentFromMineOS = "（通过 MineOS VK 客户端发送）",
+	sentFromMineOS = "（通过 TheanOS VK 客户端发送）",
 	
 	documents = "文件",
 	documentsCount = "文件总数",

@@ -184,7 +184,7 @@
 		gift = "regalo",
 		audio_message = "Audio",
 	},
-	sentFromMineOS = "(Inviato tramite client MineOS VK)",
+	sentFromMineOS = "(Inviato tramite client TheanOS VK)",
 	
 	documents = "Documenti",
 	documentsCount = "Documenti totali",

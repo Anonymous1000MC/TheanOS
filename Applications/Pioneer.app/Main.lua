@@ -562,7 +562,7 @@ helpButton.onTouch = function()
 		" ",
 		"Designed by Pioneer Corporation in Japan",
 		" ",
-		"Developed and adapted for MineOS by",
+		"Developed and adapted for TheanOS by",
 		"Igor Timofeev, vk.com/id7799889",
 		"Maxim Afonin, vk.com/id258714476"
 	}

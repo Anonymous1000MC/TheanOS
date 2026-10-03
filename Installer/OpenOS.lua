@@ -4,7 +4,7 @@ local os = require("os")
 
 local gpu = component.gpu
 
--- Checking if computer is tough enough for such a S T Y L I S H product as MineOS
+-- Checking if computer is tough enough for such a S T Y L I S H product as TheanOS
 do
 	local potatoes = {}
 

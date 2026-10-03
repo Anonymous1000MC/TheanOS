@@ -65,7 +65,7 @@
 	newFile = "Файл",
 	newFileFromURL = "Файл от URL",
 	newImage = "Изображение",
-	newApplication = "Програма за MineOS",
+	newApplication = "Програма за TheanOS",
 	paste = "Поставяне",
 	copy = "Копиране",
 	cut = "Изрязване",

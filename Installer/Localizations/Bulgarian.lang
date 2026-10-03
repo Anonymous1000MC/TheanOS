@@ -18,6 +18,6 @@
 	flashing = "Фърмуерът на EEPROM ...",
 	creating = "Създава се потребителски профил ...",
 	installing = "Монтаж",
-	installed = "MineOS е инсталиран. Наслаждавайте се!",
+	installed = "TheanOS е инсталиран. Наслаждавайте се!",
 	reboot = "Презареди",
 }

@@ -465,7 +465,7 @@ local function addMainDesktopMenuItem(menu)
 		container.layout:removeChildren()
 		
 		local lines = {
-			"MineOS",
+			"TheanOS",
 			"Copyright © 2014-" .. os.date("%Y", system.getTime()),
 			" ",
 			"Developers:",
