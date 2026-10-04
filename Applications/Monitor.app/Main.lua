@@ -17,7 +17,6 @@ local GUI = require("GUI")
 local event = require("Event")
 local filesystem = require("Filesystem")
 local paths = require("Paths")
-local image = require("Image")
 
 local currentScriptDirectory = filesystem.path(system.getCurrentScript())
 local localization = system.getLocalization(currentScriptDirectory .. "Localizations/")
@@ -259,24 +258,45 @@ end
 --- Window
 --------------------------------------------------------------------------------
 
-local workspace, window = system.addWindow(GUI.filledWindow(1, 1, 46, 22, COLOR.background))
+-- Every child below goes into the same layout cell, and that cell stacks its
+-- children vertically, so the window has to be tall enough for the sum of all of
+-- them. It was not: the window was 22 rows against roughly 30 rows of content, so
+-- the bottom of the window was simply cut off.
+--
+-- The heights are therefore declared here rather than guessed, and
+-- Tools/tests/monitor_layout_test.lua re-adds them up from this file and fails if
+-- they ever exceed the window again.
+--
+-- There is deliberately no icon in here. Every child lands in the same layout
+-- cell and that cell stacks its children top to bottom, so an icon cannot sit
+-- beside the title without a second cell -- it would stack under it and quietly
+-- add rows. The window's own title bar already says which app this is.
+local WINDOW_WIDTH = 54
+local CONTENT_HEIGHT = 27
+
+local workspace, window = system.addWindow(
+	GUI.filledWindow(1, 1, WINDOW_WIDTH, CONTENT_HEIGHT, COLOR.background)
+)
 
 local layout = window:addChild(GUI.layout(1, 1, window.width, window.height, 1, 1))
 
-local icon = layout:addChild(GUI.image(1, 1, image.load(currentScriptDirectory .. "Icon.pic")))
-icon.height = icon.height + 1
-
 -- GUI.label takes (x, y, width, height, textColor, text). Passing the text in
 -- the height slot is what put a string into .height and took the kernel down.
-layout:addChild(GUI.label(3, 1, layout.width - 2, 1, COLOR.heading, t("title", "System monitor")))
-	:setAlignment(GUI.ALIGNMENT_HORIZONTAL_LEFT, GUI.ALIGNMENT_VERTICAL_TOP)
+local title = layout:addChild(GUI.label(
+	2, 1, layout.width - 3, 1, COLOR.heading, t("title", "System monitor")
+))
+title:setAlignment(GUI.ALIGNMENT_HORIZONTAL_LEFT, GUI.ALIGNMENT_VERTICAL_CENTER)
 
 local function section(title)
-	layout:addChild(GUI.label(1, 1, layout.width - 2, 1, COLOR.heading, title))
+	return layout:addChild(GUI.label(1, 1, layout.width - 2, 1, COLOR.heading, title))
 end
 
 -- Returns the key/value object itself, not its text: refresh() assigns to
 -- `.value` on every tick, so it needs a handle rather than a copy of the string.
+--
+-- keyAndValue draws the value immediately after the key with no gap, so a short
+-- window runs the two together. WINDOW_WIDTH is sized for the longest pair,
+-- "Mounted volumes" plus its value.
 local function row(label)
 	return layout:addChild(GUI.keyAndValue(2, 1, COLOR.dim, COLOR.text, label, ""))
 end
