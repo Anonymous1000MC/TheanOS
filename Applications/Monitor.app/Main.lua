@@ -192,11 +192,13 @@ local layout = window:addChild(GUI.layout(1, 1, window.width, window.height, 1, 
 local icon = layout:addChild(GUI.image(1, 1, image.load(currentScriptDirectory .. "Icon.pic")))
 icon.height = icon.height + 1
 
-layout:addChild(GUI.label(3, 1, COLOR.heading, t("title", "System monitor")))
+-- GUI.label takes (x, y, width, height, textColor, text). Passing the text in
+-- the height slot is what put a string into .height and took the kernel down.
+layout:addChild(GUI.label(3, 1, layout.width - 2, 1, COLOR.heading, t("title", "System monitor")))
 	:setAlignment(GUI.ALIGNMENT_HORIZONTAL_LEFT, GUI.ALIGNMENT_VERTICAL_TOP)
 
 local function section(title)
-	layout:addChild(GUI.label(1, 1, COLOR.heading, title))
+	layout:addChild(GUI.label(1, 1, layout.width - 2, 1, COLOR.heading, title))
 end
 
 -- Returns the key/value object itself, not its text: refresh() assigns to
