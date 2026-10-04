@@ -2667,7 +2667,43 @@ local function dockIconEventHandler(workspace, icon, e1, e2, e3, e4, e5, e6, ...
 	end
 end
 
+-- Desktop shortcuts are normally created by the installer, driven by the
+-- "shortcut" flag in Installer/Files.cfg. That file is not itself installed, so an
+-- app added to an already-running system never receives one and simply does not
+-- show up on the desktop. This puts the shortcut back for apps that belong there
+-- but have no .lnk for it, so a newly added app appears after an update rather
+-- than only after a full reinstall.
+--
+-- Deliberately narrow: it only lists apps that should be on the desktop but are
+-- missing from it. It does not retroactively add the other nineteen apps that
+-- Files.cfg marks, because that would silently litter everyone's desktop.
+--
+-- Idempotent, and it checks before writing, so it never duplicates a shortcut or
+-- resurrects one the user deliberately deleted -- it only fills a real gap. A user
+-- who removes the icon again simply keeps it removed.
+local missingDesktopShortcuts = {
+	"Monitor.app",
+}
+
+local function ensureDesktopShortcuts()
+	for i = 1, #missingDesktopShortcuts do
+		-- Built the same way the installer builds it: filesystem.path() takes a
+		-- file path and returns its directory, so this has to go via Main.lua.
+		-- Calling it on the app directory would yield nothing.
+		local main = paths.system.applications .. missingDesktopShortcuts[i] .. "/Main.lua"
+		local where = paths.user.desktop .. filesystem.hideExtension(filesystem.name(filesystem.path(main)))
+
+		if not filesystem.exists(where .. ".lnk") and filesystem.exists(main) then
+			system.createShortcut(where, filesystem.path(main))
+		end
+	end
+end
+
 function system.updateDesktop()
+	-- Run before the icon field is built, so a freshly added app shows up in this
+	-- same frame rather than a refresh later.
+	ensureDesktopShortcuts()
+
 	desktopIconField = workspace:addChild(system.gridIconField(
 		1, 2, 1, 1, 3, 2,
 		paths.user.desktop,
