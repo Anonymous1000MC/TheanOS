@@ -12,6 +12,8 @@ local rootPath = os.getenv("THEANOS_ROOT") or "."
 local root = rootPath
 package.path = rootPath .. "/Libraries/?.lua;" .. package.path
 
+CHART_ARGS = {}
+
 local pass, fail = 0, 0
 local function check(name, cond, extra)
 	if cond then
@@ -96,10 +98,27 @@ end
 -- GUI.chart(x, y, width, height, axisColor, axisValueColor, axisHelpersColor,
 --            chartColor, xAxisValueInterval, yAxisValueInterval,
 --            xAxisPostfix, yAxisPostfix, fillChartArea, values)
+-- Captures the real series Monitor passes, so the chart-shape assertions can run
+-- against actual data rather than a hand-built stand-in.
+CHART_ARGS = {}
+
 function GUI.chart(x, y, w, h, ...)
 	local o = GUI.object(x, y, w, h)
-	o.yAxisPostfix = select(9, ...)
+	-- GUI.chart(x, y, width, height, axisColor, axisValueColor, axisHelpersColor,
+	--            chartColor, xAxisValueInterval, yAxisValueInterval, xAxisPostfix,
+	--            yAxisPostfix, fillChartArea, values)
+	-- so with (x, y, w, h) already consumed, vararg N is argument N + 4.
+	o.xAxisValueInterval = select(5, ...)
+	o.yAxisValueInterval = select(6, ...)
+	o.xAxisPostfix = select(7, ...)
+	o.yAxisPostfix = select(8, ...)
 	o.values = select(10, ...)
+	CHART_ARGS[#CHART_ARGS + 1] = {
+		values = o.values,
+		xInterval = o.xAxisValueInterval,
+		yInterval = o.yAxisValueInterval,
+		height = h,
+	}
 	return o
 end
 
@@ -302,6 +321,75 @@ print("== cancel ==")
 button.onTouch()
 button.onTouch()
 check("cancel resets the label", storage.value == "cancelled", storage.value)
+
+print("== chart data shape ==")
+-- These are the assertions that were missing when two chart bugs shipped. The
+-- chart stub used to discard everything it was given, so nothing checked that
+-- Monitor was handing GUI.chart something drawable.
+check("two charts were created", #CHART_ARGS == 2, #CHART_ARGS)
+
+for i = 1, #CHART_ARGS do
+	local chart = CHART_ARGS[i]
+	local points = chart.values
+	local label = "chart " .. i
+
+	check(label .. ": y interval is non-zero", (chart.yInterval or 0) > 0, tostring(chart.yInterval))
+	check(label .. ": x interval is non-zero", (chart.xInterval or 0) > 0, tostring(chart.xInterval))
+
+	-- Every element must be an {x, y} point table, not a bare number.
+	local bad = nil
+	for k = 1, #points do
+		local p = points[k]
+		if type(p) ~= "table" then bad = "element " .. k .. " is " .. type(p); break end
+		if type(p[1]) ~= "number" or type(p[2]) ~= "number" then
+			bad = ("element %d is not {number, number}"):format(k); break
+		end
+	end
+	check(label .. ": every value is an {x, y} point", bad == nil, bad)
+
+	-- x must increase, since drawChart sorts on it and computes deltas from it
+	local monotonic = true
+	for k = 2, #points do
+		if points[k][1] <= points[k - 1][1] then monotonic = false break end
+	end
+	check(label .. ": x increases monotonically", monotonic or #points < 2, "x not increasing")
+end
+
+print("== the real drawChart accepts what Monitor produces ==")
+do
+	local gui = assert(io.open(rootPath .. "/Libraries/GUI.lua")):read("*a")
+	local getAxisValue = assert(gui:match("(local function getAxisValue.-\nend)\n"))
+	local drawChartSrc = assert(gui:match("(local function drawChart.-\nend)\n"))
+
+	local drawn = 0
+	local stub = setmetatable({}, {__index = function()
+		return function() drawn = drawn + 1 end
+	end})
+
+	local env = setmetatable({
+		screen = stub,
+		unicode = {wlen = function(s) return #s end, len = function(s) return #s end},
+		number = {round = function(v) return math.floor(v + 0.5) end, shorten = function(v) return tostring(v) end},
+	}, {__index = _G})
+
+	local drawChart = assert(load(getAxisValue .. "\n" .. drawChartSrc .. "\nreturn drawChart\n", "g", "t", env))()
+
+	for i = 1, #CHART_ARGS do
+		local chart = CHART_ARGS[i]
+		drawn = 0
+		local ok, err = pcall(drawChart, {
+			x = 1, y = 1, width = 44, height = chart.height or 6,
+			colors = {axis = 0, chart = 0, axisValue = 0, helpers = 0},
+			values = chart.values,
+			xAxisPostfix = "", yAxisPostfix = " KB",
+			fillChartArea = true, showYAxisValues = true, showXAxisValues = true,
+			xAxisValueInterval = chart.xInterval,
+			yAxisValueInterval = chart.yInterval,
+		})
+		check(("chart %d draws with the real drawChart"):format(i), ok, err)
+		check(("chart %d drew something"):format(i), ok and drawn > 0, drawn)
+	end
+end
 
 print("== sample caps match the declared HISTORY ==")
 do

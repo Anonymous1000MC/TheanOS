@@ -60,6 +60,15 @@ local HISTORY = 60
 
 local REFRESH = 2 -- seconds between samples
 
+-- Axis label interval, used by GUI.chart as a multiplier on its axis loop step.
+--
+-- This must never be 0. drawChart steps its y axis by
+-- -chartHeight * yAxisValueInterval, and a numeric for with a step of zero never
+-- advances its control variable, so the axis loop runs forever, inserting a table
+-- and a string per pass, until the machine is out of memory. A quarter of the
+-- chart per label is what the existing chart in 3D Test uses.
+local AXIS_INTERVAL = 0.25
+
 -- Directories visited per refresh while measuring storage. Walking a tree on an
 -- Open Computers machine takes seconds, so it is spread across ticks to keep the
 -- window responsive and the cancel button honest.
@@ -100,23 +109,13 @@ local function formatUptime(seconds)
 	return ("%02d:%02d"):format(hours, minutes)
 end
 
--- Highest value in a sample array, without assuming a `unpack` alias exists.
-local function peak(values)
-	local highest = 0
-
-	for i = 1, #values do
-		if values[i] > highest then
-			highest = values[i]
-		end
-	end
-
-	return highest
-end
-
 --------------------------------------------------------------------------------
 --- State
 --------------------------------------------------------------------------------
 
+-- GUI.chart wants an array of {x, y} POINTS, not an array of bare numbers. It
+-- reads values[i][1] and values[i][2], so handing it plain numbers fails on the
+-- first comparison.
 local samples = {
 	memory = {},
 	frame = {},
@@ -128,15 +127,29 @@ local memoryText, peakText, frameTimeText, uptimeText, systemUptimeText
 local mountsText, storageText, measureButton
 
 local frameCount, frameTotal = 0, 0
+local sampleIndex = 0
 
 local measure = nil
 
-local function push(values, value)
-	values[#values + 1] = value
+local function push(values, x, y)
+	values[#values + 1] = {x, y}
 
 	while #values > HISTORY do
 		table.remove(values, 1)
 	end
+end
+
+-- Highest y in a sample series.
+local function peak(values)
+	local highest = 0
+
+	for i = 1, #values do
+		if values[i][2] > highest then
+			highest = values[i][2]
+		end
+	end
+
+	return highest
 end
 
 --------------------------------------------------------------------------------
@@ -234,10 +247,14 @@ end
 
 section(t("memoryHeading", "Memory"))
 
+-- The two interval arguments are multipliers on the loop step, not label counts.
+-- A y interval of 0 makes the step zero, and a numeric for with a zero step never
+-- advances its control variable: the axis loop then runs forever, allocating a
+-- table and a string per pass, until the machine runs out of memory.
 layout:addChild(GUI.chart(
 	1, 1, layout.width - 2, 6,
 	COLOR.dim, COLOR.dim, COLOR.grid, COLOR.accent,
-	20, 0, "", " KB", true, samples.memory
+	AXIS_INTERVAL, AXIS_INTERVAL, "", " KB", true, samples.memory
 ))
 
 memoryText = row(t("heap", "Lua heap"))
@@ -248,7 +265,7 @@ section(t("performanceHeading", "Performance"))
 layout:addChild(GUI.chart(
 	1, 1, layout.width - 2, 6,
 	COLOR.dim, COLOR.dim, COLOR.grid, COLOR.ok,
-	20, 0, "", " ms", true, samples.frame
+	AXIS_INTERVAL, AXIS_INTERVAL, "", " ms", true, samples.frame
 ))
 
 frameTimeText = row(t("refresh", "Average refresh"))
@@ -282,7 +299,9 @@ end
 local function refresh()
 	local drawBegan = computer.uptime()
 
-	push(samples.memory, collectgarbage("count"))
+	sampleIndex = sampleIndex + 1
+
+	push(samples.memory, sampleIndex, collectgarbage("count"))
 
 	-- Only this window, not workspace:draw(). The latter repaints every window,
 	-- the desktop icon field and the menus on every tick, which on a small
@@ -300,10 +319,10 @@ local function refresh()
 
 	local average = frameTotal / frameCount
 
-	push(samples.frame, math.floor(average * 1000) / 1000)
+	push(samples.frame, sampleIndex, math.floor(average * 1000) / 1000)
 	frameTimeText.value = ("%.1f ms"):format(average * 1000)
 
-	memoryText.value = formatBytes(samples.memory[#samples.memory])
+	memoryText.value = formatBytes(samples.memory[#samples.memory][2])
 	peakText.value = formatBytes(peak(samples.memory))
 	uptimeText.value = formatUptime(computer.uptime() - startedAt)
 	systemUptimeText.value = formatUptime(computer.uptime())
