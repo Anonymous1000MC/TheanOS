@@ -271,8 +271,19 @@ end
 -- cell and that cell stacks its children top to bottom, so an icon cannot sit
 -- beside the title without a second cell -- it would stack under it and quietly
 -- add rows. The window's own title bar already says which app this is.
+-- Every child stacks in one cell and MineOS puts cell.spacing (1 by default)
+-- BETWEEN each pair, so the height needed is the sum of the children plus one
+-- blank row per gap. With 14 children that is 13 extra rows, which is what made
+-- an earlier 27-row window overflow: the layout then centres its content, pushing
+-- the first children above the window and the last ones below it, so the top
+-- heading and the bottom rows vanished rather than being cleanly clipped.
+local SPACING = 1
+local CHILD_COUNT = 14
+local CONTENT_SUM = 26 -- sum of the individual child heights
+
+local CONTENT_HEIGHT = CONTENT_SUM + (CHILD_COUNT - 1) * SPACING + 1 -- + title bar
+
 local WINDOW_WIDTH = 54
-local CONTENT_HEIGHT = 27
 
 local workspace, window = system.addWindow(
 	GUI.filledWindow(1, 1, WINDOW_WIDTH, CONTENT_HEIGHT, COLOR.background)
