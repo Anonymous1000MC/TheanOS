@@ -599,6 +599,87 @@ end
 
 --------------------------------------------------------------------------------
 
+--------------------------------------------------------------------------------
+--- Bootloader
+
+-- The EEPROM holds only EFI/Stub.lua, a small loader that pulls the real
+-- bootloader from /EFI/Boot.lua on the boot disk. Flashing is therefore only
+-- needed after a fresh install, or if someone cleared the EEPROM: a normal system
+-- update already delivers a new bootloader as an ordinary file.
+--
+-- There is no EEPROM "tier" to plan around. eeprom.set() returns false when the
+-- payload does not fit, so the limit is discovered by trying and the result is
+-- checked rather than assumed.
+local STUB_PATH = "/EFI/Stub.lua"
+
+local function eepromAddress()
+	local list = component.list("eeprom")
+
+	return list and list()
+end
+
+local function flashBios()
+	if not eepromAddress() then
+		GUI.alert(t("biosTitle", "Flash BIOS"), t("biosNoEeprom", "This computer has no EEPROM."))
+
+		return
+	end
+
+	if not filesystem.exists(STUB_PATH) then
+		GUI.alert(t("biosTitle", "Flash BIOS"),
+			t("biosMissing", "EFI/Stub.lua is not on this system. Update first."))
+
+		return
+	end
+
+	local payload = filesystem.read(STUB_PATH)
+
+	if not payload or #payload == 0 then
+		GUI.alert(t("biosTitle", "Flash BIOS"), t("biosUnreadable", "The bootloader stub could not be read."))
+
+		return
+	end
+
+	local address = component.invoke(eepromAddress(), "getData")
+	local label = component.invoke(eepromAddress(), "getLabel")
+
+	local box = openOverlay(t("biosTitle", "Flash BIOS"), true)
+
+	box:addChild(GUI.text(1, 1, COLOR.text, t("biosExplain", "Writes the bootloader stub into EEPROM.")))
+	box:addChild(GUI.text(1, 1, COLOR.text, t("biosSize", "Stub size: %d bytes"):format(#payload)))
+	box:addChild(GUI.text(1, 1, COLOR.text, t("biosLabel", "Current label: %s"):format(label or t("unknown", "unknown"))))
+	box:addChild(GUI.text(1, 1, COLOR.text, t("biosData", "Boot device: %s"):format(address or t("none", "none"))))
+	box:addChild(GUI.text(1, 1, COLOR.warn, t("biosWarn", "Only needed if the machine does not boot.")))
+	box:addChild(GUI.object(1, 1, 1, 1))
+
+	local buttons = box:addChild(GUI.layout(1, 1, 30, 3, 1, 1))
+	buttons:setDirection(1, 1, GUI.DIRECTION_HORIZONTAL)
+	buttons:setSpacing(1, 1, 2)
+
+	buttons:addChild(GUI.adaptiveRoundedButton(1, 1, 2, 0, 0x66DB80, 0xFFFFFF, 0x33B65C, 0xFFFFFF, t("biosFlash", "Flash"))).onTouch = function()
+		local success = component.invoke(eepromAddress(), "set", payload)
+
+		closeOverlay()
+
+		if success == false then
+			GUI.alert(t("biosTitle", "Flash BIOS"), t("biosTooLarge", "EEPROM cannot hold %d bytes."):format(#payload))
+		else
+			component.invoke(eepromAddress(), "setLabel", "TheanOS EFI")
+
+			GUI.alert(t("biosTitle", "Flash BIOS"), t("biosDone", "Bootloader flashed."))
+		end
+
+		workspace:draw()
+	end
+
+	buttons:addChild(GUI.adaptiveRoundedButton(1, 1, 2, 0, 0xC3C3C3, 0x878787, 0xA5A5A5, 0x696969, t("notNow", "Not now"))).onTouch = function()
+		closeOverlay()
+		workspace:draw()
+	end
+
+	workspace:draw()
+end
+
 module.onTouch = function()
 	closeOverlay()
 
@@ -632,6 +713,10 @@ module.onTouch = function()
 
 	buttons:addChild(GUI.adaptiveRoundedButton(1, 1, 2, 0, 0xC3C3C3, 0x878787, 0xA5A5A5, 0x696969, t("checkForUpdates", "Check for updates"))).onTouch = function()
 		checkForUpdates()
+	end
+
+	buttons:addChild(GUI.adaptiveRoundedButton(1, 1, 2, 0, 0xE8A33D, 0xFFFFFF, 0xB8860B, 0xFFFFFF, t("flashBios", "Flash BIOS"))).onTouch = function()
+		flashBios()
 	end
 
 	updateButton = buttons:addChild(GUI.adaptiveRoundedButton(1, 1, 2, 0, 0x66B6FF, 0xFFFFFF, 0x3388DD, 0xFFFFFF, t("updateNow", "Update now")))

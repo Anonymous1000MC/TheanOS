@@ -15,7 +15,10 @@ local screenWidth, screenHeight = component.invoke(GPUAddress, "getResolution")
 
 local repositoryURL = "https://raw.githubusercontent.com/Anonymous1000MC/TheanOS/master/"
 local installerURL = "Installer/"
-local EFIURL = "EFI/Minified.lua"
+-- Only the stub is written to EEPROM. It is tiny and it loads the real
+-- bootloader from /EFI/Boot.lua on the boot disk, so the bootloader can be
+-- updated by the ordinary file update instead of by rewriting EEPROM.
+local EFIURL = "EFI/Stub.lua"
 
 local installerPath = "/TheanOS installer/"
 local installerPicturesPath = installerPath .. "Installer/Pictures/"
@@ -881,9 +884,32 @@ addStage(function()
 	addTitle("muted", localization.flashing)
 	workspace:draw()
 	
-	component.invoke(EEPROMAddress, "set", request(EFIURL))
-	component.invoke(EEPROMAddress, "setLabel", "TheanOS EFI")
-	component.invoke(EEPROMAddress, "setData", selectedFilesystemProxy.address)
+	local bootloader = request(EFIURL)
+
+	if #bootloader == 0 then
+		addTitle("error", localization.efiFailed or "Could not download the bootloader")
+		workspace:draw()
+		computer.sleep(5)
+	else
+		local size = #bootloader
+		addTitle("muted", localization.flashing)
+		addTitle("muted", ("%s (%d B)"):format(EFIURL, size))
+		workspace:draw()
+
+		-- set() returns false when the EEPROM cannot hold the payload. Report that
+		-- plainly instead of leaving a machine that will not boot.
+		local flashed = component.invoke(EEPROMAddress, "set", bootloader)
+
+		if flashed == false then
+			addTitle("error", localization.efiTooLarge or "EEPROM is too small for the bootloader")
+		else
+			component.invoke(EEPROMAddress, "setLabel", "TheanOS EFI")
+			component.invoke(EEPROMAddress, "setData", selectedFilesystemProxy.address)
+		end
+
+		workspace:draw()
+		computer.sleep(2)
+	end
 
 
 	-- Saving system versions

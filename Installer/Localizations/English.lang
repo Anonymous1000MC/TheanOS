@@ -24,4 +24,6 @@
 	installing = "Installing",
 	installed = "TheanOS has been installed. Enjoy!",
 	reboot = "Reboot the computer",
+	efiFailed = "Could not download the bootloader",
+	efiTooLarge = "EEPROM is too small for the bootloader",
 }
