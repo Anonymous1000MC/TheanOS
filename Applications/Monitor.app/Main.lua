@@ -46,17 +46,31 @@ local COLOR = {
 	grid = 0x3A3A3A,
 }
 
--- Samples kept per chart. At the default refresh rate this is a little over two
--- minutes of history: enough to read a trend, bounded so the arrays cannot grow
--- without limit while the window stays open.
-local HISTORY = 90
+-- Samples kept per chart, and how often a sample is taken.
+--
+-- Both were reduced after this app was found to be able to exhaust memory on a
+-- 2 MB machine. The arrays themselves are tiny; the cost was the repaint. Each
+-- GUI draw allocates strings and small tables, and doing that for the whole
+-- desktop once a second left the collector no headroom, so the transient peak
+-- could exceed free RAM before a collection ran -- which is what produced
+-- "not enough memory" rather than an outright leak.
+--
+-- 60 samples at 2 seconds is two minutes of history, the same span as before.
+local HISTORY = 60
 
-local REFRESH = 1 -- seconds between samples
+local REFRESH = 2 -- seconds between samples
 
 -- Directories visited per refresh while measuring storage. Walking a tree on an
 -- Open Computers machine takes seconds, so it is spread across ticks to keep the
 -- window responsive and the cancel button honest.
 local SCAN_BATCH = 6
+
+-- Hard cap on directories waiting to be visited. The queue is the only structure
+-- here whose size is set by the user's data rather than by us, so without a cap a
+-- home directory with thousands of folders would allocate thousands of pending
+-- entries on a machine with 2 MB of RAM. Past this the scan stops and says so,
+-- rather than reporting a total that is quietly wrong.
+local SCAN_QUEUE_LIMIT = 128
 
 local startedAt = computer.uptime()
 
@@ -134,6 +148,7 @@ local function startMeasure()
 		queue = {{path = paths.user.home, depth = 0}},
 		files = 0,
 		total = 0,
+		truncated = false,
 	}
 
 	storageText.value = t("measuring", "measuring...")
@@ -156,8 +171,10 @@ local function stepMeasure()
 
 			if filesystem.isDirectory(child) then
 				-- Guard against symlink loops and absurd nesting.
-				if job.depth < 8 then
+				if job.depth < 8 and #measure.queue < SCAN_QUEUE_LIMIT then
 					measure.queue[#measure.queue + 1] = {path = child, depth = job.depth + 1}
+				elseif job.depth < 8 then
+					measure.truncated = true
 				end
 			else
 				measure.files = measure.files + 1
@@ -169,7 +186,15 @@ local function stepMeasure()
 	if #measure.queue > 0 then
 		storageText.value = t("measuringCount", "measuring... %d files"):format(measure.files)
 	else
-		storageText.value = t("measured", "%d files, %s"):format(measure.files, formatBytes(measure.total / 1024))
+		if measure.truncated then
+			-- Say plainly that this is a partial answer. A total that silently omits
+			-- most of a directory tree is worse than no total.
+			storageText.value = t("measuredPartial", "partial: %d files, %s so far")
+				:format(measure.files, formatBytes(measure.total / 1024))
+		else
+			storageText.value = t("measured", "%d files, %s"):format(measure.files, formatBytes(measure.total / 1024))
+		end
+
 		measureButton.text = t("measure", "Measure home")
 		measure = nil
 	end
@@ -259,7 +284,11 @@ local function refresh()
 
 	push(samples.memory, collectgarbage("count"))
 
-	workspace:draw()
+	-- Only this window, not workspace:draw(). The latter repaints every window,
+	-- the desktop icon field and the menus on every tick, which on a small
+	-- machine is what pushed the transient allocation peak past free RAM.
+	-- window:draw() is the established idiom for a self-contained redraw.
+	window:draw()
 
 	-- Cost of the refresh itself. On a healthy machine this is a couple of
 	-- milliseconds; when the system is struggling it climbs into the tens, which

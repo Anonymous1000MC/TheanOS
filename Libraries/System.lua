@@ -2683,6 +2683,7 @@ end
 -- who removes the icon again simply keeps it removed.
 local missingDesktopShortcuts = {
 	"Monitor.app",
+	"Terminal.app",
 }
 
 local function ensureDesktopShortcuts()

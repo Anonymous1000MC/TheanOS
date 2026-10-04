@@ -15,5 +15,6 @@
 	measuring = "measuring...",
 	measuringCount = "measuring... %d files",
 	measured = "%d files, %s",
+	measuredPartial = "partial: %d files, %s so far",
 	cancelled = "cancelled",
 }

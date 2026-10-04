@@ -85,8 +85,13 @@ local function newSystem(fs)
 	return system
 end
 
-local APP_MAIN = "/Applications/Monitor.app/Main.lua"
-local SHORTCUT = "/Users/t/Desktop/Monitor.lnk"
+local APPS = {
+	{app = "Monitor.app", main = "/Applications/Monitor.app/Main.lua", lnk = "/Users/t/Desktop/Monitor.lnk"},
+	{app = "Terminal.app", main = "/Applications/Terminal.app/Main.lua", lnk = "/Users/t/Desktop/Terminal.lnk"},
+}
+
+local APP_MAIN = APPS[1].main
+local SHORTCUT = APPS[1].lnk
 
 --------------------------------------------------------------------------------
 -- Cases
@@ -96,10 +101,14 @@ print("== fresh install: no shortcut present ==")
 local filesystem, writes, backing = newFiles({APP_MAIN})
 local ensure, list = compile(filesystem, paths, newSystem(filesystem))
 
-check("list contains Monitor.app", (function()
-	for _, name in ipairs(list) do if name == "Monitor.app" then return true end end
-	return false
-end)(), table.concat(list, ","))
+-- Every app that Files.cfg marks with shortcut = true must be reconciled here,
+-- otherwise it stays invisible on already-installed systems.
+for i = 1, #APPS do
+	local entry = APPS[i]
+	local listed = false
+	for _, name in ipairs(list) do if name == entry.app then listed = true end end
+	check("list contains " .. entry.app, listed, table.concat(list, ","))
+end
 
 ensure()
 check("shortcut created", filesystem.exists(SHORTCUT))
@@ -113,6 +122,31 @@ local before = #writes
 ensure()
 ensure()
 check("no further writes", #writes == before, #writes - before)
+
+print("== Terminal also gets a shortcut ==")
+local fsT, writesT = newFiles({APPS[2].main})
+local ensureT = compile(fsT, paths, newSystem(fsT))
+ensureT()
+check("Terminal shortcut created", fsT.exists(APPS[2].lnk), table.concat((function()
+	local k = {} for p in pairs(fsT.exists and {} or {}) do k[#k+1] = p end return k end)(), ","))
+check("Terminal target is the app directory",
+	writesT[1] ~= nil and writesT[1].data == "/Applications/Terminal.app/", writesT[1] and writesT[1].data)
+
+print("== Files.cfg agrees for both apps ==")
+do
+	local cfg = assert(load("return " .. assert(io.open(root .. "/Installer/Files.cfg")):read("*a")))()
+	for i = 1, #APPS do
+		local want = "Applications/" .. APPS[i].app .. "/Main.lua"
+		local found = false
+		for _, item in ipairs(cfg.required) do
+			if type(item) == "table" and item.path == want then
+				found = true
+				check("Files.cfg shortcut = true for " .. APPS[i].app, item.shortcut == true, tostring(item.shortcut))
+			end
+		end
+		check("Files.cfg entry present for " .. APPS[i].app, found)
+	end
+end
 
 print("== app missing: nothing is written ==")
 local fs2, writes2 = newFiles({}) -- neither shortcut nor app

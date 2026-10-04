@@ -8,8 +8,9 @@
 -- class of mistake fails here instead of on a computer.
 
 -- Run from the repository root:  lua5.3 Tools/tests/monitor_test.lua
-local root = os.getenv("THEANOS_ROOT") or "."
-package.path = root .. "/Libraries/?.lua;" .. package.path
+local rootPath = os.getenv("THEANOS_ROOT") or "."
+local root = rootPath
+package.path = rootPath .. "/Libraries/?.lua;" .. package.path
 
 local pass, fail = 0, 0
 local function check(name, cond, extra)
@@ -26,7 +27,7 @@ end
 -- GUI stubs (signatures from Libraries/GUI.lua)
 --------------------------------------------------------------------------------
 
-local drawn = 0
+local drawn, windowDrawn = 0, 0
 local workspace = {draw = function() drawn = drawn + 1 end}
 
 local function object(x, y, w, h)
@@ -187,6 +188,9 @@ function system.addWindow(w)
 	w.actionButtons = GUI.actionButtons(1, 1)
 	w.backgroundPanel = GUI.panel(1, 1, w.width, w.height)
 	w.remove = function() removed = true end
+	-- the real GUI.window exposes draw (windowDraw); Monitor repaints itself
+	-- rather than the whole desktop
+	w.draw = function() windowDrawn = windowDrawn + 1 end
 	return workspace, w
 end
 
@@ -213,7 +217,7 @@ end
 --------------------------------------------------------------------------------
 
 print("== load ==")
-local ok, err = pcall(dofile, root .. "/Applications/Monitor.app/Main.lua")
+local ok, err = pcall(dofile, rootPath .. "/Applications/Monitor.app/Main.lua")
 check("app loads without error", ok, err)
 if not ok then os.exit(1) end
 
@@ -221,7 +225,12 @@ check("a window was added", addedWindow ~= nil)
 check("a periodic handler was registered", next(handlers) ~= nil)
 
 local h = next(handlers)
-check("refresh interval is 1s", h and h.interval == 1, h and h.interval)
+-- The interval is read from the source rather than hardcoded, because it was
+-- deliberately raised from 1s to 2s after this app was found to exhaust memory.
+local srcText = assert(io.open(rootPath .. "/Applications/Monitor.app/Main.lua")):read("*a")
+local declaredRefresh = tonumber(srcText:match("local REFRESH = (%d+)"))
+check("refresh interval matches the source", h and h.interval == declaredRefresh,
+	("%s vs %s"):format(tostring(h and h.interval), tostring(declaredRefresh)))
 
 print("== child geometry ==")
 -- Every child the app put in the window must have numeric width/height, which is
@@ -245,7 +254,8 @@ print("== ticking ==")
 for i = 1, 5 do uptime = uptime + 1 h.callback() end
 check("memory chart filled", #charts[1].values == 6, #charts[1].values)
 check("frame chart filled", #charts[2].values == 6, #charts[2].values)
-check("workspace redrawn on every tick", drawn >= 5, drawn)
+check("window repainted on every tick", windowDrawn >= 5, windowDrawn)
+check("desktop not fully repainted every tick", drawn <= 2, drawn)
 
 local values = {}
 for _, c in ipairs(root.children) do
@@ -265,15 +275,16 @@ check("system uptime formatted", values["System uptime"] ~= nil, values["System 
 check("mounts counted", values["Mounted volumes"] == "3", values["Mounted volumes"])
 
 print("== history bound ==")
+local declaredHistory = tonumber(srcText:match("local HISTORY = (%d+)"))
 for i = 1, 200 do uptime = uptime + 1 h.callback() end
-check("memory history capped at 90", #charts[1].values == 90, #charts[1].values)
-check("frame history capped at 90", #charts[2].values == 90, #charts[2].values)
+check("memory history capped at HISTORY", #charts[1].values == declaredHistory, #charts[1].values)
+check("frame history capped at HISTORY", #charts[2].values == declaredHistory, #charts[2].values)
 
 print("== storage scan ==")
 local button, storage
 for _, c in ipairs(root.children) do
 	if c.key == "Home directory" then storage = c end
-	if c.onTouch and c.text == "Measure home" then button = c end
+	if c.onTouch and (c.text == "Measure home" or c.text == "Cancel") then button = c end
 end
 check("measure button found", button ~= nil)
 
@@ -291,6 +302,90 @@ print("== cancel ==")
 button.onTouch()
 button.onTouch()
 check("cancel resets the label", storage.value == "cancelled", storage.value)
+
+print("== sample caps match the declared HISTORY ==")
+do
+	local src = assert(io.open(rootPath .. "/Applications/Monitor.app/Main.lua")):read("*a")
+	local history = tonumber(src:match("local HISTORY = (%d+)"))
+	local refresh = tonumber(src:match("local REFRESH = (%d+)"))
+	check("HISTORY parsed from source", history ~= nil, tostring(history))
+	check("both charts capped at HISTORY", #charts[1].values <= history and #charts[2].values <= history,
+		#charts[1].values .. "/" .. #charts[2].values)
+	check("refresh is no faster than 2s", refresh ~= nil and refresh >= 2, tostring(refresh))
+	print(("     HISTORY=%d REFRESH=%ds -> %ds of history")
+		:format(history, refresh, history * refresh))
+end
+
+print("== memory growth ==")
+-- Does anything accumulate without bound? The stub workspace draws nothing, so
+-- this isolates Monitor's own allocations (sample arrays, string churn, the
+-- storage-scan queue) from the cost of a real GUI repaint.
+local function kb() return collectgarbage("count") end
+
+local tick = h.callback
+collectgarbage("collect")
+local baseline = kb()
+
+for i = 1, 200 do uptime = uptime + 1 tick() end
+collectgarbage("collect")
+local after200 = kb()
+
+for i = 1, 800 do uptime = uptime + 1 tick() end
+collectgarbage("collect")
+local after1000 = kb()
+
+print(("     baseline %.1f KB, after 200 ticks %.1f KB, after 1000 ticks %.1f KB")
+	:format(baseline, after200, after1000))
+print(("     charts: %d + %d samples (capped at 90 each)"):format(#charts[1].values, #charts[2].values))
+
+check("sample arrays stay capped", #charts[1].values <= 90 and #charts[2].values <= 90,
+	#charts[1].values .. "/" .. #charts[2].values)
+
+-- The real question is whether growth stops. 200 -> 1000 ticks is 800 more ticks;
+-- if it were leaking, that delta would dwarf the first 200.
+local firstPhase = after200 - baseline
+local secondPhase = after1000 - after200
+print(("     growth over first 200 ticks: %.1f KB, over next 800: %.1f KB")
+	:format(firstPhase, secondPhase))
+check("growth does not scale with tick count (no leak)",
+	secondPhase <= math.max(firstPhase, 1) * 1.5 + 4,
+	("first %.1f KB then %.1f KB"):format(firstPhase, secondPhase))
+
+print("== storage scan queue is bounded ==")
+-- Build a wide, shallow tree: one directory holding many subdirectories. Without
+-- the cap the scan queues every one of them, which on a small machine is the
+-- only structure here whose size is set by the user's data.
+local WIDE = 400
+local wideFiles, wideDir = {}, {}
+wideFiles["/Users/wide/seed.txt"] = "x"
+for i = 1, WIDE do wideDir["/Users/wide/d" .. i .. "/"] = true end
+
+local savedFiles, savedDir = FILES, DIR
+FILES, DIR = wideFiles, wideDir
+paths.user.home = "/Users/wide/"
+
+collectgarbage("collect")
+local beforeWide = collectgarbage("count")
+
+button.onTouch() -- start the scan
+for i = 1, 400 do h.callback() end
+
+collectgarbage("collect")
+local afterWide = collectgarbage("count")
+local peakKB = afterWide - beforeWide
+
+storage = nil
+for _, c in ipairs(root.children) do if c.key == "Home directory" then storage = c end end
+local report = tostring(storage.value)
+
+print(("     wide tree: %d dirs, peak growth %.1f KB, report: %s"):format(WIDE, peakKB, report))
+check("scan completed", report:match("files") ~= nil, report)
+check("scan reports itself as partial when it truncates",
+	report:match("partial") ~= nil, report)
+check("peak growth stays modest", peakKB < 256, ("%.1f KB"):format(peakKB))
+
+FILES, DIR = savedFiles, savedDir
+paths.user.home = "/Users/t/"
 
 print("== closing ==")
 addedWindow.actionButtons.close.onTouch()
