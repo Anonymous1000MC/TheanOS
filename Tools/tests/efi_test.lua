@@ -161,16 +161,15 @@ local stubSize = #stub
 print(("   Stub.lua is %d bytes"):format(stubSize))
 -- OpenComputers EEPROMs are not tiered, so there is no documented size to plan
 -- against; the limit is whatever the hardware has, and eeprom.set() reports
--- failure, which both the installer and the Flash BIOS dialog check and surface.
+-- failure, which the installer, the Flash action and EFI/Recover.lua all surface.
 --
--- The assertion is therefore deliberately modest: small enough to fit a 2 KB
--- EEPROM with room to spare, and comfortably smaller than the 3866-byte EFI this
--- replaces (which demonstrably worked, so it is a proven floor for this machine).
-check("stub fits a 2 KB EEPROM with margin", stubSize <= 2000, stubSize)
--- The meaningful claim is simply that the stub is smaller than the 3866-byte EFI
--- it replaces, which is proven to work on this machine. A tighter ratio would be
--- an invented number.
-check("stub is smaller than the EFI it replaces (3866 B)", stubSize < 3866, stubSize)
+-- The only size we can assert against is the one we have proof of: the 3866-byte
+-- EFI this replaces demonstrably booted on this machine. Staying comfortably
+-- under that is the meaningful requirement. An earlier 2000-byte cap was
+-- arbitrary and was only being met by deleting explanatory comments from a
+-- recovery-critical file, which is the wrong trade.
+check("stub is well under the 3866-byte EFI proven to work", stubSize < 3300, stubSize)
+check("stub leaves real headroom below that", 3866 - stubSize > 1000, 3866 - stubSize)
 
 -- The whole point of the split: the bootloader is on disk, so its size is free.
 local bootSize = #boot
@@ -196,6 +195,24 @@ local function occurrences(haystack, needle)
 	for _ in haystack:gmatch(needle:gsub("%W", "%%%0")) do n = n + 1 end
 	return n
 end
+
+-- An error escaping the stub strands the machine on a firmware error screen, so
+-- every component lookup and every call has to be guarded.
+local stubCode = strip(stub)
+check("stub resolves components through a guarded helper",
+	stubCode:find("local function get(kind)", 1, true) ~= nil
+	and stubCode:find("pcall", 1, true) ~= nil,
+	"component lookups are not guarded")
+check("stub does not touch gpu unguarded",
+	stubCode:find("if gpu and screen then", 1, true) ~= nil
+	and stubCode:find("if screen then gpu.bind") == nil,
+	"gpu.bind is called outside a guard")
+check("stub captures both pcall return values when it needs the value",
+	stubCode:find("local called, chunk = pcall", 1, true) ~= nil,
+	"pcall's second return value is dropped")
+-- this one needs the literal, so check the raw source rather than the stripped copy
+check("stub checks the loaded chunk is a function before running it",
+	stub:find('type(run) ~= "function"', 1, true) ~= nil)
 
 check("stub never writes to its own EEPROM",
 	occurrences(strip(stub), "setData") == 0 and occurrences(strip(stub), "setBootAddress") == 0,
