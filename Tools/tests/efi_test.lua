@@ -301,5 +301,20 @@ end
 check(("all %d expected features are present"):format(#FEATURES), #missing == 0,
 	table.concat(missing, ", "))
 
+--------------------------------------------------------------------------------
+-- 8. The menu must not depend on unicode.wlen, and must not crash on a bad entry
+--------------------------------------------------------------------------------
+
+print("== the 1.7.2 menu crash, guarded ==")
+
+-- The bootloader this replaced used plain # and booted. unicode.wlen is not
+-- guaranteed in the boot environment, and calling it crashed the menu on the
+-- first draw, which is what the user hit when holding Alt.
+check("bootloader never calls unicode.wlen", occurrences(strip(boot), "unicode.wlen") == 0,
+	occurrences(strip(boot), "unicode.wlen"))
+check("width helper tolerates nil", boot:find("#tostring(text)", 1, true) ~= nil)
+check("drawPanel skips entries that are not tables",
+	boot:find('type(line) == "table"', 1, true) ~= nil)
+
 print(("== RESULT: %d passed, %d failed =="):format(pass, fail))
 os.exit(fail == 0 and 0 or 1)

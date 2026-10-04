@@ -79,9 +79,15 @@ local function fillRectangle(x1, y1, x2, y2, color)
 	end
 end
 
+-- Plain #, deliberately. The bootloader this replaces used # and was proven to
+-- work; unicode.wlen is not guaranteed to exist in the boot environment, and
+-- calling it there crashed the menu on the first draw.
+local function textWidth(text)
+	return #tostring(text)
+end
+
 local function drawCentered(y, color, text)
-	local width = unicode.wlen(text)
-	drawText(math.floor(screenWidth / 2 - width / 2), y, color, text)
+	drawText(math.floor(screenWidth / 2 - textWidth(text) / 2), y, color, text)
 end
 
 --------------------------------------------------------------------------------
@@ -153,7 +159,7 @@ local function drawMenu(title, elements)
 						local valueText = tostring(element.value)
 
 						drawText(
-							math.max(4, screenWidth - 3 - unicode.wlen(valueText)),
+							math.max(4, screenWidth - 3 - textWidth(valueText)),
 							y, COLOR.accent, valueText
 						)
 					end
@@ -243,19 +249,24 @@ local function drawPanel(title, lines, footer)
 	local y = 5
 
 	for _, line in ipairs(lines) do
-		local label, value = line[1], line[2]
+		-- Entries are {label, value} pairs. Anything else is skipped rather than
+		-- passed on: a stray string here used to arrive as drawCentered(nil) and
+		-- take the entire menu down.
+		if type(line) == "table" then
+			local label, value = line[1], line[2]
 
-		if label then
-			drawText(3, y, COLOR.dim, label)
+			if label then
+				drawText(3, y, COLOR.dim, label)
 
-			if value then
-				drawText(
-					math.max(3 + unicode.wlen(label) + 2, screenWidth - 3 - unicode.wlen(tostring(value))),
-					y, COLOR.text, tostring(value)
-				)
+				if value then
+					drawText(
+						math.max(3 + textWidth(label) + 2, screenWidth - 3 - textWidth(tostring(value))),
+						y, COLOR.text, tostring(value)
+					)
+				end
+			else
+				drawCentered(y, COLOR.heading, value)
 			end
-		else
-			drawCentered(y, COLOR.heading, value)
 		end
 
 		y = y + 1
