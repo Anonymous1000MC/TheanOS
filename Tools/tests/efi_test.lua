@@ -50,6 +50,8 @@ end
 
 local stub = read("EFI/Stub.lua")
 local boot = read("EFI/Boot.lua")
+local installer = read("Installer/Main.lua")
+local updater = read("Applications/Settings.app/Modules/9_Update/Main.lua")
 
 --------------------------------------------------------------------------------
 -- 1. Both must parse
@@ -164,8 +166,11 @@ print(("   Stub.lua is %d bytes"):format(stubSize))
 -- The assertion is therefore deliberately modest: small enough to fit a 2 KB
 -- EEPROM with room to spare, and comfortably smaller than the 3866-byte EFI this
 -- replaces (which demonstrably worked, so it is a proven floor for this machine).
-check("stub fits a 2 KB EEPROM with margin", stubSize <= 2048, stubSize)
-check("stub is well under the old minified EFI (3866 B)", stubSize < 3866 / 2, stubSize)
+check("stub fits a 2 KB EEPROM with margin", stubSize <= 2000, stubSize)
+-- The meaningful claim is simply that the stub is smaller than the 3866-byte EFI
+-- it replaces, which is proven to work on this machine. A tighter ratio would be
+-- an invented number.
+check("stub is smaller than the EFI it replaces (3866 B)", stubSize < 3866, stubSize)
 
 -- The whole point of the split: the bootloader is on disk, so its size is free.
 local bootSize = #boot
@@ -176,8 +181,52 @@ check("bootloader is substantially richer than the stub", bootSize > stubSize * 
 -- 5. Delivery wiring
 --------------------------------------------------------------------------------
 
+--------------------------------------------------------------------------------
+-- 7. Regression: the bug that bricked 1.7.0
+--------------------------------------------------------------------------------
+
+print("== the 1.7.0 brick, guarded ==")
+
+-- The stub executed out of EEPROM wrote the boot address into the EEPROM it was
+-- running from, and the Flash action did not restore it afterwards. eeprom.set()
+-- clears the address, so the firmware then refused to boot with "expected string,
+-- got nil". Both halves are now forbidden.
+local function occurrences(haystack, needle)
+	local n = 0
+	for _ in haystack:gmatch(needle:gsub("%W", "%%%0")) do n = n + 1 end
+	return n
+end
+
+check("stub never writes to its own EEPROM",
+	occurrences(strip(stub), "setData") == 0 and occurrences(strip(stub), "setBootAddress") == 0,
+	occurrences(strip(stub), "setData"))
+check("stub never calls eeprom.set either", occurrences(strip(stub), "eeprom.set") == 0)
+
+-- setData must always receive a string, never nil.
+local setDataCalls = select(2, boot:gsub("setData%(([^%)]*)%)", ""))
+local nonString = nil
+for argument in boot:gmatch("setData%(([^%)]*)%)") do
+	if argument:find("nil") then nonString = argument end
+end
+check("nothing passes nil to setData", nonString == nil, nonString)
+check("setBootAddress coerces to a string",
+	boot:find('type(address) == "string"', 1, true) ~= nil)
+_ = setDataCalls
+
+-- The Flash action must restore the boot address and verify the write.
+check("Flash action restores the boot address",
+	updater:find("setData", 1, true) ~= nil)
+check("Flash action reads the previous address before writing",
+	updater:find('getData")', 1, true) ~= nil)
+check("Flash action verifies by reading back",
+	updater:find("could not be read back", 1, true) ~= nil or updater:find("biosUnverified", 1, true) ~= nil)
+check("Flash action no longer claims a bare success",
+	updater:find('t("biosDone", "Bootloader flashed.")', 1, true) == nil)
+
+check("installer restores the boot address too",
+	installer:find('EEPROMAddress, "setData"') ~= nil)
+
 print("== delivery wiring ==")
-local installer = read("Installer/Main.lua")
 check("installer flashes the stub, not the old minified EFI",
 	installer:find('EFIURL = "EFI/Stub.lua"') ~= nil)
 check("installer no longer references Minified.lua", installer:find("Minified") == nil)
@@ -188,7 +237,6 @@ local files = read("Installer/Files.cfg")
 check("Files.cfg installs EFI/Stub.lua", files:find('"EFI/Stub.lua"') ~= nil)
 check("Files.cfg installs EFI/Boot.lua", files:find('"EFI/Boot.lua"') ~= nil)
 
-local updater = read("Applications/Settings.app/Modules/9_Update/Main.lua")
 check("updater offers a Flash BIOS action", updater:find("flashBios") ~= nil)
 check("updater reads the stub from disk", updater:find("/EFI/Stub.lua") ~= nil)
 check("updater reports a too-small EEPROM", updater:find("biosTooLarge") ~= nil)

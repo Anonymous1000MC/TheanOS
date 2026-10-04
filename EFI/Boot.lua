@@ -304,6 +304,18 @@ local function readFile(proxy, path)
 	return data
 end
 
+-- Reads a whole file through a filesystem proxy. The boot environment has no
+-- filesystem library, so this is the only way to read /EFI/Stub.lua.
+local function proxyRead(path)
+	for address in componentList("filesystem") do
+		local proxy = componentProxy(address)
+
+		if proxy and proxy.exists(path) then
+			return readFile(proxy, path)
+		end
+	end
+end
+
 local function bootFrom(proxy, once)
 	for _, path in ipairs(BOOT_CANDIDATES) do
 		if proxy.exists(path) then
@@ -341,9 +353,23 @@ local function bootFrom(proxy, once)
 	return false
 end
 
+-- The EEPROM must only ever be handed a string. Passing nil clears the field in a
+-- way the firmware then rejects at boot with "expected string, got nil", so an
+-- empty string is used to mean "unset" and the result is read back.
 local function setBootAddress(address)
-	pcall(computer.setBootAddress, address)
-	pcall(function() eepromProxy.setData(address) end)
+	local value = type(address) == "string" and address or ""
+
+	pcall(computer.setBootAddress, value)
+
+	local ok = pcall(function() eepromProxy.setData(value) end)
+	local stored = ok and eepromProxy.getData() or nil
+
+	if type(stored) ~= "string" then
+		status("Warning: boot address did not save")
+		return false
+	end
+
+	return true
 end
 
 local function bootDevice(address)
@@ -604,8 +630,40 @@ local function maintenance()
 		header("Maintenance"),
 
 		item("Clear boot device", function()
-			pcall(function() eepromProxy.setData(nil) end)
+			-- Empty string, not nil: the EEPROM has to keep holding a string.
+			setBootAddress("")
 			status("Boot device cleared; the next boot will scan all disks")
+			maintenance()
+		end),
+
+		item("Restore bootloader from disk", function()
+			-- Reads /EFI/Stub.lua and writes it back. This is the recovery path if
+			-- the EEPROM is left without a working bootloader.
+			local path = "/EFI/Stub.lua"
+			local data = proxyRead(path)
+
+			if not data then
+				status("Cannot read " .. path)
+				maintenance()
+				return
+			end
+
+			local written = eepromProxy.set(data)
+
+			if written == false then
+				status("EEPROM cannot hold " .. #data .. " bytes")
+			else
+				eepromProxy.setLabel("TheanOS EFI")
+
+				local stored = eepromProxy.get()
+
+				if type(stored) == "string" and #stored == #data then
+					status("Bootloader restored and verified")
+				else
+					status("Written but not readable. Do not reboot.")
+				end
+			end
+
 			maintenance()
 		end),
 

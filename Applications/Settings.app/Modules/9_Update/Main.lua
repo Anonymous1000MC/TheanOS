@@ -657,16 +657,42 @@ local function flashBios()
 	buttons:setSpacing(1, 1, 2)
 
 	buttons:addChild(GUI.adaptiveRoundedButton(1, 1, 2, 0, 0x66DB80, 0xFFFFFF, 0x33B65C, 0xFFFFFF, t("biosFlash", "Flash"))).onTouch = function()
-		local success = component.invoke(eepromAddress(), "set", payload)
+		local eeprom = eepromAddress()
+
+		-- Read these BEFORE writing. eeprom.set() rewrites the stored blob, which
+		-- clears the boot address, and a bootloader with no boot address leaves the
+		-- firmware unable to validate it -- it boots to "expected string, got nil".
+		-- 1.7.0 shipped without the setData call below and bricked exactly that way.
+		local previousAddress = component.invoke(eeprom, "getData")
+		local previousLabel = component.invoke(eeprom, "getLabel")
+
+		local success = component.invoke(eeprom, "set", payload)
 
 		closeOverlay()
 
 		if success == false then
 			GUI.alert(t("biosTitle", "Flash BIOS"), t("biosTooLarge", "EEPROM cannot hold %d bytes."):format(#payload))
 		else
-			component.invoke(eepromAddress(), "setLabel", "TheanOS EFI")
+			component.invoke(eeprom, "setLabel", previousLabel or "TheanOS EFI")
 
-			GUI.alert(t("biosTitle", "Flash BIOS"), t("biosDone", "Bootloader flashed."))
+			-- Restore the boot device. Falling back to the running filesystem is
+			-- what a fresh flash should use; the installer passes its own explicitly.
+			local bootAddress = previousAddress or paths.system.filesystem
+
+			if bootAddress then
+				component.invoke(eeprom, "setData", bootAddress)
+			end
+
+			-- Read back rather than trusting the write. Claiming success on a
+			-- half-written EEPROM is how this got shipped.
+			local stored = component.invoke(eeprom, "get")
+
+			if type(stored) == "string" and #stored == #payload then
+				GUI.alert(t("biosTitle", "Flash BIOS"), t("biosDone", "Bootloader flashed and verified."))
+			else
+				GUI.alert(t("biosTitle", "Flash BIOS"),
+					t("biosUnverified", "Written but could not be read back. Do not reboot."))
+			end
 		end
 
 		workspace:draw()
