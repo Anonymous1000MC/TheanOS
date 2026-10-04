@@ -236,9 +236,32 @@ end
 --------------------------------------------------------------------------------
 
 print("== load ==")
+
+-- OpenComputers has no collectgarbage global. Hiding it while the app loads is
+-- the whole point: calling it there raised "attempt to call a nil value" and the
+-- app died on its first refresh. Standard Lua does have it, which is why this went
+-- unnoticed until it ran on hardware.
+local realCollectGarbage = collectgarbage
+_G.collectgarbage = nil
+
 local ok, err = pcall(dofile, rootPath .. "/Applications/Monitor.app/Main.lua")
-check("app loads without error", ok, err)
+
+_G.collectgarbage = realCollectGarbage
+
+check("app loads with no collectgarbage global, as on OpenComputers", ok, err)
 if not ok then os.exit(1) end
+
+print("== no collectgarbage call anywhere in the source ==")
+do
+	local src = realCollectGarbage and nil
+	local f = assert(io.open(rootPath .. "/Applications/Monitor.app/Main.lua"))
+	local text = f:read("*a")
+	f:close()
+	-- a call, not a mention in a comment
+	local calls = select(2, text:gsub("collectgarbage%s*%(", ""))
+	check("source never calls collectgarbage", calls == 0, calls)
+	_ = src
+end
 
 check("a window was added", addedWindow ~= nil)
 check("a periodic handler was registered", next(handlers) ~= nil)
@@ -474,6 +497,52 @@ check("peak growth stays modest", peakKB < 256, ("%.1f KB"):format(peakKB))
 
 FILES, DIR = savedFiles, savedDir
 paths.user.home = "/Users/t/"
+
+print("== memory readers degrade gracefully ==")
+-- The computer table's memory APIs vary between OpenComputers versions, so both
+-- readers must be guarded. Extract them and run them against different stubs
+-- rather than assuming one API is present.
+do
+	local f = assert(io.open(rootPath .. "/Applications/Monitor.app/Main.lua"))
+	local text = f:read("*a")
+	f:close()
+
+	local used = assert(text:match("(local function readMemoryUsed.-\nend)"))
+	local total = assert(text:match("(local function readMemoryTotal.-\nend)"))
+
+	local function build(computer)
+		local env = setmetatable({computer = computer}, {__index = _G})
+		return assert(load(used .. "\n" .. total .. "\nreturn readMemoryUsed, readMemoryTotal\n", "m", "t", env))()
+	end
+
+	-- modern: both present
+	local readUsed, readTotal = build({
+		getMemory = function() return 12345 end,
+		totalMemory = function() return 65536 end,
+	})
+	check("reads in-use when getMemory exists", readUsed() == 12345, tostring(readUsed()))
+	check("reads total when totalMemory exists", readTotal() == 65536, tostring(readTotal()))
+
+	-- older OpenComputers: only totalMemory
+	readUsed, readTotal = build({totalMemory = function() return 32768 end})
+	check("in-use returns nil when getMemory is absent", readUsed() == nil, tostring(readUsed()))
+	check("total still works", readTotal() == 32768, tostring(readTotal()))
+
+	-- neither
+	readUsed, readTotal = build({})
+	check("in-use nil when no API at all", readUsed() == nil, tostring(readUsed()))
+	check("total nil when no API at all", readTotal() == nil, tostring(readTotal()))
+
+	-- an API that exists but throws must not take the app down
+	readUsed = build({getMemory = function() error("no memory component") end})
+	local okThrow, valueThrow = pcall(readUsed)
+	check("a throwing getMemory returns nil instead of propagating", okThrow and valueThrow == nil,
+		tostring(valueThrow))
+
+	-- an API returning a non-number must be rejected
+	readUsed = build({getMemory = function() return "lots" end})
+	check("non-number return is rejected", readUsed() == nil, tostring(readUsed()))
+end
 
 print("== closing ==")
 addedWindow.actionButtons.close.onTouch()

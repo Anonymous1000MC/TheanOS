@@ -87,6 +87,42 @@ local startedAt = computer.uptime()
 --- Formatting
 --------------------------------------------------------------------------------
 
+-- Live memory reading.
+--
+-- OpenComputers does NOT expose collectgarbage -- it is nil there, so calling it
+-- raises "attempt to call a nil value" and takes the app down with a red error
+-- box. The usable sources are on the computer table, and which ones exist varies
+-- by OpenComputers version, so every read is guarded and simply returns nil when
+-- unavailable rather than failing.
+--
+-- computer.getMemory() is bytes in use; computer.totalMemory() is the installed
+-- size and is the one this codebase already relies on (see OS.lua). Returns
+-- kilobytes, or nil if neither is available.
+local function readMemoryUsed()
+	if type(computer.getMemory) == "function" then
+		local ok, value = pcall(computer.getMemory)
+
+		if ok and type(value) == "number" then
+			return value
+		end
+	end
+
+	return nil
+end
+
+-- Total installed memory, in kilobytes, or nil.
+local function readMemoryTotal()
+	if type(computer.totalMemory) == "function" then
+		local ok, value = pcall(computer.totalMemory)
+
+		if ok and type(value) == "number" then
+			return value
+		end
+	end
+
+	return nil
+end
+
 local function formatBytes(kilobytes)
 	if kilobytes >= 1024 * 1024 then
 		return ("%.2f GB"):format(kilobytes / 1024 / 1024)
@@ -301,7 +337,8 @@ local function refresh()
 
 	sampleIndex = sampleIndex + 1
 
-	push(samples.memory, sampleIndex, collectgarbage("count"))
+	local memoryUsed = readMemoryUsed()
+	push(samples.memory, sampleIndex, memoryUsed or 0)
 
 	-- Only this window, not workspace:draw(). The latter repaints every window,
 	-- the desktop icon field and the menus on every tick, which on a small
@@ -322,7 +359,13 @@ local function refresh()
 	push(samples.frame, sampleIndex, math.floor(average * 1000) / 1000)
 	frameTimeText.value = ("%.1f ms"):format(average * 1000)
 
-	memoryText.value = formatBytes(samples.memory[#samples.memory][2])
+	if memoryUsed then
+		memoryText.value = formatBytes(memoryUsed)
+	else
+		-- Say so rather than showing a flat, meaningless line.
+		memoryText.value = t("memoryUnavailable", "not reported by this computer")
+	end
+
 	peakText.value = formatBytes(peak(samples.memory))
 	uptimeText.value = formatUptime(computer.uptime() - startedAt)
 	systemUptimeText.value = formatUptime(computer.uptime())

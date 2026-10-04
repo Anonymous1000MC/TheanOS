@@ -1,7 +1,8 @@
 {
 	title = "System monitor",
 	memoryHeading = "Memory",
-	heap = "Lua heap",
+	heap = "Memory in use",
+	memoryUnavailable = "not reported by this computer",
 	peak = "Peak in window",
 	performanceHeading = "Performance",
 	refresh = "Average refresh",
