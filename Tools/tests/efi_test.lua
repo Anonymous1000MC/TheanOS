@@ -48,6 +48,7 @@ local function read(path)
 	return text
 end
 
+local stringsURLBootMarker = "URL boot"
 local stub = read("EFI/Stub.lua")
 local boot = read("EFI/Boot.lua")
 local installer = read("Installer/Main.lua")
@@ -226,8 +227,8 @@ for argument in boot:gmatch("setData%(([^%)]*)%)") do
 	if argument:find("nil") then nonString = argument end
 end
 check("nothing passes nil to setData", nonString == nil, nonString)
-check("setBootAddress coerces to a string",
-	boot:find('type(address) == "string"', 1, true) ~= nil)
+check("the proven disk utility keeps its own address writing",
+	boot:find("eepromSetData(proxy.address)", 1, true) ~= nil)
 _ = setDataCalls
 
 -- The Flash action must restore the boot address and verify the write.
@@ -269,25 +270,19 @@ check("stub still boots the OS", stub:find("/OS.lua") ~= nil)
 
 print("== bootloader features ==")
 local FEATURES = {
-	{"boot menu", "Boot menu"},
-	{"disk utility", "Disk utility"},
+	{"boot menu", "Boot from device"},
+	{"continue boot", "Continue boot"},
 	{"diagnostics", "Diagnostics"},
 	{"maintenance", "Maintenance"},
-	{"tools", "Tools"},
 	{"about", "About"},
-	{"memory report", "Memory"},
-	{"graphics report", "Graphics"},
-	{"eeprom report", "Eeprom"},
-	{"component inventory", "Components"},
-	{"self test", "Self test"},
-	{"energy report", "Energy"},
-	{"memory test", "Memory test"},
-	{"url boot", "Boot from URL"},
-	{"set boot device", "Set as boot device"},
-	{"rename volume", "Rename volume"},
-	{"erase data", "Erase all data"},
+	{"disk utility", "Disk utility"},
+	{"url boot", stringsURLBootMarker},
+	{"system recovery", "System recovery"},
+	{"set bootable", "Set as bootable"},
+	{"change label", "Change label"},
+	{"erase", "Erase"},
 	{"clear boot device", "Clear boot device"},
-	{"reset bootloader", "Reset bootloader"},
+	{"restore bootloader", "Restore bootloader from disk"},
 	{"reboot", "Reboot"},
 }
 
@@ -312,9 +307,74 @@ print("== the 1.7.2 menu crash, guarded ==")
 -- first draw, which is what the user hit when holding Alt.
 check("bootloader never calls unicode.wlen", occurrences(strip(boot), "unicode.wlen") == 0,
 	occurrences(strip(boot), "unicode.wlen"))
-check("width helper tolerates nil", boot:find("#tostring(text)", 1, true) ~= nil)
-check("drawPanel skips entries that are not tables",
-	boot:find('type(line) == "table"', 1, true) ~= nil)
+check("text width is plain string length, which cannot be handed nil",
+	boot:find("mathFloor(screenWidth / 2 - #text / 2)", 1, true) ~= nil)
+
+--------------------------------------------------------------------------------
+-- 9. No globals the boot environment does not provide
+--------------------------------------------------------------------------------
+
+print("== globals the boot environment may not have ==")
+
+-- Each of these was introduced by the rewrite and crashed on hardware or in the
+-- probe: unicode.wlen is absent from the boot environment, and mathCeil was never
+-- bound by the bootloader that actually booted. The header binds mathMax, mathMin,
+-- mathHuge and mathFloor, and nothing else.
+local NOT_PROVIDED = {"mathCeil", "unicode.wlen", "table.unpack", "string.pack", "os."}
+
+for _, name in ipairs(NOT_PROVIDED) do
+	local plain = name:gsub("%.", "")
+	local hits = 0
+
+	for _ in boot:gmatch("([^%w_])" .. plain .. "([^%w_])") do hits = hits + 1 end
+
+	check(("bootloader does not use %s"):format(name), hits == 0, hits .. " occurrence(s)")
+end
+
+check("header binds mathFloor for rounding", boot:find("mathFloor", 1, true) ~= nil)
+-- An unbound eeprom method is an immediate nil-call crash, which is how
+-- eepromSet / eepromGet / eepromSetLabel / eepromGetLabel were caught. The
+-- locals are the eeprom proxy's methods bound to file-scope names, so each name
+-- used must also appear in the header's binding list.
+-- An unbound eeprom method is an immediate nil-call crash, which is exactly how
+-- eepromSet / eepromGet / eepromSetLabel / eepromGetLabel were caught in the
+-- rewrite. Each local the file calls must be bound to the proxy method of the
+-- same name in the header.
+local REQUIRED_BINDINGS = {
+	"eeprom.setData", "eeprom.getData",
+	"eeprom.set", "eeprom.get",
+	"eeprom.setLabel", "eeprom.getLabel",
+}
+
+local missingBindings = {}
+for _, binding in ipairs(REQUIRED_BINDINGS) do
+	if not boot:find(binding, 1, true) then
+		missingBindings[#missingBindings + 1] = binding
+	end
+end
+
+check("every eeprom method the bootloader calls is bound in the header",
+	#missingBindings == 0, table.concat(missingBindings, ", "))
+
+-- And nothing may call an eeprom local that does not exist at all.
+local declaredLocals = {}
+for name in boot:gmatch("eeprom[%a]+%s*%(") do
+	local trimmed = name:match("^(eeprom[%a]+)")
+	if trimmed then declaredLocals[trimmed] = true end
+end
+
+local known = {
+	eepromSetData = true, eepromGetData = true, eepromSet = true, eepromGet = true,
+	eepromSetLabel = true, eepromGetLabel = true,
+}
+
+local unknownLocals = {}
+for name in pairs(declaredLocals) do
+	if not known[name] then unknownLocals[#unknownLocals + 1] = name end
+end
+table.sort(unknownLocals)
+
+check("no unknown eeprom local is called", #unknownLocals == 0, table.concat(unknownLocals, ", "))
 
 print(("== RESULT: %d passed, %d failed =="):format(pass, fail))
 os.exit(fail == 0 and 0 or 1)

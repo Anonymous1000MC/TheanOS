@@ -267,13 +267,14 @@ local function tryEntry(downs)
 	return ok, reason, table.concat(out, " | ")
 end
 
-local NAMES = {"Continue boot", "Boot menu", "Disk utility", "Diagnostics", "Maintenance", "Tools", "About", "Reboot", "Power off"}
+-- The proven BIOS's own menu, in the order it builds it. With no internet
+-- component in the stub, System recovery and URL boot are not inserted.
+local NAMES = {"Continue boot", "Boot from device", "Disk utility", "Diagnostics",
+	"Maintenance", "About", "Reboot"}
 local failures = 0
 
--- element 1 of the menu is the header row, so reaching NAMES[index] needs
--- index + 1 presses of Down
 for index = 0, #NAMES - 1 do
-	local ok, reason, console = tryEntry(index + 1)
+	local ok, reason, console = tryEntry(index)
 	local status = ok and "ok  " or "FAIL"
 
 	if not ok then failures = failures + 1 end

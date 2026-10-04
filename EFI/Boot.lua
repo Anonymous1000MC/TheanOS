@@ -1,1014 +1,705 @@
--- TheanOS bootloader
---
--- Loaded from disk by EFI/Stub.lua, which is what actually lives in EEPROM. Keeping
--- the two apart means this file can be as large as it likes: the update system
--- delivers it as an ordinary file, so pushing a release updates the bootloader
--- with no EEPROM rewrite and no size ceiling.
---
--- Runs in OpenComputers' boot environment. That means no require(), no
--- filesystem library and no MineOS libraries -- only component, computer, gpu,
--- screen and the Lua standard library. Tools/tests/efi_test.lua enforces that.
 
-local componentProxy = component.proxy
-local componentList = component.list
-local pullSignal = computer.pullSignal
-local uptime = computer.uptime
+local
+	stringsTheanOSEFI,
+	stringsChangeLabel,
+	stringsKeyDown,
+	stringsComponentAdded,
+	stringsFilesystem,
+	stringsURLBoot,
+	stringsBootMark,
+	
+	componentProxy,
+	componentList,
+	pullSignal,
+	uptime,
+	tableInsert,
+	mathMax,
+	mathMin,
+	mathHuge,
+	mathFloor,
 
---------------------------------------------------------------------------------
---- Palette and drawing
---------------------------------------------------------------------------------
+	colorsTitle,
+	colorsBackground,
+	colorsText,
+	colorsSelectionBackground,
+	colorsSelectionText,
 
-local COLOR = {
-	title = 0x2D2D2D,
-	background = 0x1E1E1E,
-	text = 0xE1E1E1,
-	dim = 0x878787,
-	heading = 0xFFFFFF,
-	accent = 0x66DB80,
-	warn = 0xE8A33D,
-	error = 0xE05A5A,
-	selected = 0x3A5A8C,
-	panel = 0x2A2A2A,
-}
+	OSList,
+	bindGPUToScreen,
+	drawRectangle,
+	drawText,
+	newMenuElement,
+	drawCentrizedText,
+	drawTitle,
+	status,
+	executeString,
+	boot,
+	newMenuBackElement,
+	menu,
+	input,
+	internetExecute =
 
-local screenWidth, screenHeight = 80, 25
-local eepromProxy, gpuProxy, screenProxy
+	"TheanOS EFI",
+	"Change label",
+	"key_down",
+	"component_added",
+	"filesystem",
+	"URL boot",
+	"\u{25B6} ",
 
-local function bindScreen()
-	screenProxy = componentList("screen")()
+	component.proxy,
+	component.list,
+	computer.pullSignal,
+	computer.uptime,
+	table.insert,
+	math.max,
+	math.min,
+	math.huge,
+	math.floor,
 
-	if screenProxy then
-		gpuProxy.bind(screenProxy, true)
-		gpuProxy.setDepth(8)
+	0x2D2D2D,
+	0xE1E1E1,
+	0x878787,
+	0x878787,
+	0xE1E1E1
 
-		screenWidth, screenHeight = gpuProxy.getResolution()
-	end
-end
+local
+	eeprom,
+	gpu,
+	internetAddress =
 
-local function clearScreen()
-	gpuProxy.setBackground(COLOR.background)
-	gpuProxy.fill()
-end
+	componentProxy(componentList("eeprom")()),
+	componentProxy(componentList("gpu")()),
+	componentList("internet")()
 
-local function drawText(x, y, color, text)
-	gpuProxy.setForeground(color)
-	gpuProxy.set(x, y, color, COLOR.background, text)
-end
+local
+	gpuSet,
+	gpuSetBackground,
+	gpuFill,
+	eepromSetData,
+	eepromGetData,
+	eepromSet,
+	eepromGet,
+	eepromSetLabel,
+	eepromGetLabel,
+	screenWidth, 
+	screenHeight =
 
-local function drawRectangle(x1, y1, x2, y2, color)
-	gpuProxy.setForeground(color)
+	gpu.set,
+	gpu.setBackground,
+	gpu.fill,
+	eeprom.setData,
+	eeprom.getData,
+	eeprom.set,
+	eeprom.get,
+	eeprom.setLabel,
+	eeprom.getLabel
 
-	for y = y1, y2 do
-		gpuProxy.set(x1, y, color, COLOR.background, " ")
-		gpuProxy.set(x2, y, color, COLOR.background, " ")
-	end
+OSList,
+bindGPUToScreen,
+drawRectangle,
+drawText,
+newMenuElement,
+drawCentrizedText,
+drawTitle,
+status,
+executeString,
+boot,
+newMenuBackElement,
+menu,
+input,
+internetExecute =
 
-	for x = x1, x2 do
-		gpuProxy.set(x, y1, color, COLOR.background, " ")
-		gpuProxy.set(x, y2, color, COLOR.background, " ")
-	end
-end
-
-local function fillRectangle(x1, y1, x2, y2, color)
-	gpuProxy.setForeground(color)
-
-	for y = y1, y2 do
-		for x = x1, x2 do
-			gpuProxy.set(x, y, color, color, " ")
+{
+	{
+		"/OS.lua"
+	},
+	{
+		"/init.lua",
+		function()
+			computer.getBootAddress, computer.setBootAddress = eepromGetData, eepromSetData
 		end
+	}
+},
+
+function()
+	local screenAddress = componentList("screen")()
+	
+	if screenAddress then
+		gpu.bind(screenAddress, true)
+		screenWidth, screenHeight = gpu.getResolution()
+		gpu.setDepth(8)	
 	end
-end
+end,
 
--- Plain #, deliberately. The bootloader this replaces used # and was proven to
--- work; unicode.wlen is not guaranteed to exist in the boot environment, and
--- calling it there crashed the menu on the first draw.
-local function textWidth(text)
-	return #tostring(text)
-end
+function(x, y, width, height, color)
+	gpuSetBackground(color)
+	gpuFill(x, y, width, height, " ")
+end,
 
-local function drawCentered(y, color, text)
-	drawText(math.floor(screenWidth / 2 - textWidth(text) / 2), y, color, text)
-end
+function(x, y, foreground, text)
+	gpu.setForeground(foreground)
+	gpuSet(x, y, text)
+end,
 
---------------------------------------------------------------------------------
---- Status line
---------------------------------------------------------------------------------
+function(text, callback, breakLoop)
+	return {
+		s = text,
+		c = callback,
+		b = breakLoop
+	}
+end,
 
-local statusText = ""
+function(y, foreground, text)
+	drawText(mathFloor(screenWidth / 2 - #text / 2), y, foreground, text)
+end,
 
--- Only print() is guaranteed in the boot environment, so the status line is done
--- with escape codes rather than io.write.
-local function status(text)
-	statusText = text
-	print("\27[2K\r " .. text)
-end
+function(y, title)
+	y = mathFloor(screenHeight / 2 - y / 2)
+	drawRectangle(1, 1, screenWidth, screenHeight, colorsBackground)
+	drawCentrizedText(y, colorsTitle, title)
 
-local function clearStatus()
-	statusText = ""
-	print("\27[2K\r")
-end
+	return y + 2
+end,
 
---------------------------------------------------------------------------------
---- Menu
---------------------------------------------------------------------------------
+function(statusText, needWait)
+	local lines = {}
 
--- An element is { label = string, action = function or nil, isHeader = bool }
-local function header(text)
-	return {label = text, isHeader = true}
-end
-
-local function item(label, action, value)
-	return {label = label, action = action, value = value}
-end
-
-local function back(redraw)
-	return item("← Back", redraw)
-end
-
-local function drawMenu(title, elements)
-	local selected = 1
-	local redraw = true
-
-	while true do
-		if redraw then
-			clearScreen()
-
-			drawCentered(2, COLOR.title, title)
-			drawRectangle(1, 3, screenWidth, 3, COLOR.title)
-
-			local y = 5
-			local shown = 0
-
-			for index = 1, #elements do
-				local element = elements[index]
-
-				if not element.hidden then
-					shown = shown + 1
-
-					local isSelected = index == selected
-					local color = element.isHeader and COLOR.heading
-						or (isSelected and COLOR.text or COLOR.dim)
-
-					if isSelected then
-						fillRectangle(2, y, screenWidth - 2, y, COLOR.selected)
-					end
-
-					drawText(4, y, color, element.label)
-
-					if element.value then
-						local valueText = tostring(element.value)
-
-						drawText(
-							math.max(4, screenWidth - 3 - textWidth(valueText)),
-							y, COLOR.accent, valueText
-						)
-					end
-
-					y = y + 1
-				end
-			end
-
-			drawText(2, screenHeight - 1, COLOR.dim, "↑↓ select   Enter confirm   Esc back")
-		end
-
-		local event = {pullSignal()}
-
-		if event[1] == "key_down" then
-			local code = event[4]
-
-			if code == 200 then -- up
-				repeat
-					selected = selected - 1
-					if selected < 1 then selected = #elements end
-				until not elements[selected].hidden
-
-				redraw = true
-			elseif code == 208 then -- down
-				repeat
-					selected = selected + 1
-					if selected > #elements then selected = 1 end
-				until not elements[selected].hidden
-
-				redraw = true
-			elseif code == 28 then -- enter
-				local element = elements[selected]
-
-				if element.action then
-					clearStatus()
-
-					local keepGoing = element.action()
-					if keepGoing == false then break end
-				end
-
-				redraw = true
-			elseif code == 27 then -- escape
-				return true
-			end
-		end
-
-		if redraw then clearStatus() end
+	for line in statusText:gmatch("[^\r\n]+") do
+		lines[#lines + 1] = line:gsub("\t", "  ")
 	end
-end
-
---------------------------------------------------------------------------------
---- Hardware report
---------------------------------------------------------------------------------
-
-local function humanBytes(bytes)
-	if bytes >= 1024 * 1024 * 1024 then
-		return ("%.2f GB"):format(bytes / 1024 / 1024 / 1024)
-	elseif bytes >= 1024 * 1024 then
-		return ("%.1f MB"):format(bytes / 1024 / 1024)
-	elseif bytes >= 1024 then
-		return ("%.1f KB"):format(bytes / 1024)
-	end
-
-	return (bytes .. " B")
-end
-
-local function hasComponent(kind)
-	return component.proxy(component.list(kind)()) ~= nil
-end
-
-local function componentCount(kind)
-	local total = 0
-
-	for _ in componentList(kind) do
-		total = total + 1
-	end
-
-	return total
-end
-
-local function drawPanel(title, lines, footer)
-	clearScreen()
-
-	drawCentered(2, COLOR.title, title)
-	drawRectangle(1, 3, screenWidth, 3, COLOR.title)
-
-	local y = 5
-
-	for _, line in ipairs(lines) do
-		-- Entries are {label, value} pairs. Anything else is skipped rather than
-		-- passed on: a stray string here used to arrive as drawCentered(nil) and
-		-- take the entire menu down.
-		if type(line) == "table" then
-			local label, value = line[1], line[2]
-
-			if label then
-				drawText(3, y, COLOR.dim, label)
-
-				if value then
-					drawText(
-						math.max(3 + textWidth(label) + 2, screenWidth - 3 - textWidth(tostring(value))),
-						y, COLOR.text, tostring(value)
-					)
-				end
-			else
-				drawCentered(y, COLOR.heading, value)
-			end
-		end
-
+	
+	local y = drawTitle(#lines, stringsTheanOSEFI)
+	
+	for i = 1, #lines do
+		drawCentrizedText(y, colorsText, lines[i])
 		y = y + 1
-
-		if y >= screenHeight - 2 then break end
 	end
 
-	if footer then
-		drawCentered(screenHeight - 1, COLOR.dim, footer)
-	end
-end
+	if needWait then
+		while pullSignal() ~= stringsKeyDown do
 
-local function waitForKey()
-	local event = {pullSignal()}
-
-	if event[1] == "key_down" then
-		return event[4]
-	end
-
-	return nil
-end
-
---------------------------------------------------------------------------------
---- Boot
---------------------------------------------------------------------------------
-
-local BOOT_CANDIDATES = {"/OS.lua", "/init.lua"}
-
-local function readFile(proxy, path)
-	local handle, reason = proxy.open(path, "rb")
-
-	if not handle then
-		return nil, reason
-	end
-
-	local data = ""
-	local chunk
-
-	repeat
-		chunk = proxy.read(handle, math.huge)
-		data = data .. (chunk or "")
-	until not chunk
-
-	proxy.close(handle)
-
-	return data
-end
-
--- Reads a whole file through a filesystem proxy. The boot environment has no
--- filesystem library, so this is the only way to read /EFI/Stub.lua.
-local function proxyRead(path)
-	for address in componentList("filesystem") do
-		local proxy = componentProxy(address)
-
-		if proxy and proxy.exists(path) then
-			return readFile(proxy, path)
 		end
 	end
-end
+end,
 
-local function bootFrom(proxy, once)
-	for _, path in ipairs(BOOT_CANDIDATES) do
-		if proxy.exists(path) then
-			local data, reason = readFile(proxy, path)
+function(...)
+	local result, reason = load(...)
 
-			if data then
-				clearScreen()
-				status("Booting " .. path)
+	if result then
+		result, reason = xpcall(result, debug.traceback)
 
-				local chunk, loadReason = load(data, path)
+		if result then
+			return
+		end
+	end
 
-				if chunk then
-					local ran, runReason = xpcall(chunk, debug.traceback)
+	status(reason, 1)
+end,
 
-					if ran then
-						return true
-					end
+function(proxy)
+	local OS
 
-					status("Boot failed: " .. tostring(runReason))
-					print(tostring(runReason))
-					waitForKey()
-				else
-					status("Syntax error in " .. path .. ": " .. tostring(loadReason))
-					waitForKey()
-				end
-			else
-				status("Cannot read " .. path .. ": " .. tostring(reason))
-				waitForKey()
+	for i = 1, #OSList do
+		OS = OSList[i]
+
+		if proxy.exists(OS[1]) then
+			status("Booting from " .. (proxy.getLabel() or proxy.address))
+
+			-- Updating current EEPROM boot address if it's differs from given proxy address
+			if eepromGetData() ~= proxy.address then
+				eepromSetData(proxy.address)
 			end
 
-			break
+			-- Running OS pre-boot function
+			if OS[2] then
+				OS[2]()
+			end
+
+			-- Reading boot file
+			local handle, data, chunk, success, reason = proxy.open(OS[1], "rb"), ""
+
+			repeat
+				chunk = proxy.read(handle, mathHuge)
+				data = data .. (chunk or "")
+			until not chunk
+
+			proxy.close(handle)
+
+			-- Running boot file
+			executeString(data, "=" .. OS[1])
+
+			return 1
 		end
 	end
+end,
 
-	return false
-end
+function(f)
+	return newMenuElement("Back", f, 1)
+end,
 
--- The EEPROM must only ever be handed a string. Passing nil clears the field in a
--- way the firmware then rejects at boot with "expected string, got nil", so an
--- empty string is used to mean "unset" and the result is read back.
-local function setBootAddress(address)
-	local value = type(address) == "string" and address or ""
+function(title, items)
+	local selectedIndex = 1
 
-	pcall(computer.setBootAddress, value)
+	while 1 do
+		local y, x, text, e = drawTitle(#items + 2, title)
+		
+		for i = 1, #items do
+			text = "  " .. items[i].s .. "  "
+			x = mathFloor(screenWidth / 2 - #text / 2)
+			
+			if i == selectedIndex then
+				gpuSetBackground(colorsSelectionBackground)
+				drawText(x, y, colorsSelectionText, text)
+				gpuSetBackground(colorsBackground)
+			else
+				drawText(x, y, colorsText, text)
+			end
+			
+			y = y + 1
+		end
 
-	local ok = pcall(function() eepromProxy.setData(value) end)
-	local stored = ok and eepromProxy.getData() or nil
+		e = { pullSignal() }
 
-	if type(stored) ~= "string" then
-		status("Warning: boot address did not save")
-		return false
+		if e[1] == stringsKeyDown then
+			if e[4] == 200 and selectedIndex > 1 then
+				selectedIndex = selectedIndex - 1
+			
+			elseif e[4] == 208 and selectedIndex < #items then
+				selectedIndex = selectedIndex + 1
+			
+			elseif e[4] == 28 then
+				if items[selectedIndex].c then
+					items[selectedIndex].c()
+				end
+				
+				if items[selectedIndex].b then
+					break
+				end
+			end
+		elseif e[1] == stringsComponentAdded and e[3] == "screen" then
+			bindGPUToScreen()
+		end
 	end
+end,
 
-	return true
-end
+function(title, prefix)
+	local
+		y,
+		text,
+		state,
+		prefixedText,
+		char,
+		e =
 
-local function bootDevice(address)
-	local proxy = componentProxy(address)
+		drawTitle(2, title),
+		"",
+		1
 
-	if not proxy then
-		return false
+	while 1 do
+		prefixedText = prefix .. text
+
+		gpuFill(1, y, screenWidth, 1, " ")
+		drawCentrizedText(y, colorsText, prefixedText .. (state and "_" or ""))
+
+		e = { pullSignal(0.5) }
+
+		if e[1] == stringsKeyDown then
+			if e[4] == 28 then
+				return text
+
+			elseif e[4] == 14 then
+				text = text:sub(1, -2)
+			
+			else
+				char = unicode.char(e[3])
+
+				if char:match("^[%w%d%p%s]+") then
+					text = text .. char
+				end
+			end
+
+			state = 1
+		
+		elseif e[1] == "clipboard" then
+			text = text .. e[3]
+		
+		elseif not e[1] then
+			state = not state
+		end
 	end
+end,
 
-	setBootAddress(address)
-	return bootFrom(proxy)
+function(url)
+	local
+		connection,
+		data,
+		result,
+		reason =
+
+		componentProxy(internetAddress).request(url),
+		""
+
+	if connection then
+		status("Downloading script")
+
+		while 1 do
+			result, reason = connection.read(mathHuge)	
+			
+			if result then
+				data = data .. result
+			else
+				connection.close()
+				
+				if reason then
+					status(reason, 1)
+				else
+					executeString(data, "=url")
+				end
+
+				break
+			end
+		end
+	else
+		status("Invalid URL", 1)
+	end
 end
 
-local function continueBoot()
-	local address = eepromProxy.getData()
+bindGPUToScreen()
+status("Hold Alt to show boot options")
 
-	if address then
-		local proxy = componentProxy(address)
+-- Set by menu entries that end the session (Continue boot, Boot from device,
+-- Reboot) so the Alt block below returns to the normal boot path instead of
+-- dropping the user back into the menu.
+local menuExit = false
+
+--------------------------------------------------------------------------------
+--- Submenus
+--
+-- Everything below uses only the calls the rest of this file already used:
+-- component.list / component.proxy, computer.pullSignal / uptime / shutdown /
+-- setBootAddress, gpu.bind / setDepth / setBackground / fill / setForeground /
+-- set / getResolution, table.insert, string.rep and math. computer.totalMemory is
+-- wrapped in pcall because it is the one addition and may not exist here.
+--------------------------------------------------------------------------------
+
+local function safeTotalMemory()
+	local ok, value = pcall(computer.totalMemory)
+	return (ok and type(value) == "number") and value or nil
+end
+
+local function deviceSummary()
+	local found, address, total, used = {}, eepromGetData(), 0, 0
+
+	for candidate in componentList(stringsFilesystem) do
+		local proxy = componentProxy(candidate)
 
 		if proxy then
-			clearScreen()
-			status("Booting from " .. address:sub(1, 8) .. "…")
-
-			if bootFrom(proxy) then
-				return true
-			end
+			found[#found + 1] = candidate
+			total = total + (proxy.spaceTotal() or 0)
+			used = used + (proxy.spaceUsed() or 0)
 		end
 	end
 
-	-- Fall back to trying everything we can find, most recently added first.
-	for address in componentList("filesystem") do
-		local proxy = componentProxy(address)
+	local percent = total > 0 and mathFloor(used / total * 100) or 0
 
-		if proxy and bootFrom(proxy) then
-			computer.shutdown()
-		end
-	end
-
-	return false
+	return #found, total, used, percent, address
 end
 
---------------------------------------------------------------------------------
---- Disk utility
---------------------------------------------------------------------------------
+local function diagnosticsItems()
+	local disks, total, used, percent = deviceSummary()
 
-local function deviceKind(proxy)
-	local total = proxy.spaceTotal()
+	local items = {
+		newMenuElement("Disks: " .. tostring(disks)),
+		newMenuElement("Space: " .. tostring(used) .. " / " .. tostring(total) .. " bytes"),
+		newMenuElement("Usage: " .. tostring(percent) .. "%"),
+	}
 
-	if total > 1048575 then
-		return "HDD"
-	elseif total > 65535 then
-		return "FDD"
-	end
+	local memory = safeTotalMemory()
+	tableInsert(items, #items, newMenuElement("Memory: " .. (memory and (tostring(mathFloor(memory / 1024)) .. " KB") or "not reported")))
 
-	return "SYS"
+	tableInsert(items, #items, newMenuElement("Boot device: " .. (eepromGetData() or "not set")))
+	tableInsert(items, #items, newMenuElement("Screen: " .. tostring(screenWidth) .. " x " .. tostring(screenHeight)))
+
+	tableInsert(items, #items, newMenuBackElement())
+
+	return items
 end
 
-local function diskList(redraw)
-	local elements = {header("Disks"), back(redraw)}
-
-	for address in componentList("filesystem") do
-		local proxy = componentProxy(address)
-		local label = proxy.getLabel() or "Unnamed"
-		local readOnly = proxy.isReadOnly()
-		local total = proxy.spaceTotal()
-		local used = proxy.spaceUsed()
-		local percent = total > 0 and math.ceil(used / total * 100) or 0
-
-		local isBoot = address == eepromProxy.getData()
-		local suffix = isBoot and "  ← boot" or ""
-
-		table.insert(elements, item(
-			(isBoot and "▶ " or "  ") .. label .. suffix,
-			function()
-				local actions = {
-					header(label .. "  " .. address:sub(1, 8) .. "…"),
-					item("Set as boot device", function()
-						setBootAddress(address)
-						diskList(redraw)
-					end),
-				}
-
-				if not readOnly then
-					table.insert(actions, #actions + 1, item("Rename volume", function()
-						-- The BIOS has no keyboard text entry of its own, so this
-						-- cycles a small set of names rather than prompting.
-						local suggestions = {"TheanOS", "System", "Data", "Backup"}
-						local index = 1
-
-						for candidate = 2, #suggestions do
-							if suggestions[candidate] == label then
-								index = candidate
-								break
-							end
-						end
-
-						index = index % #suggestions + 1
-						pcall(proxy.setLabel, suggestions[index])
-
-						status("Volume renamed to " .. suggestions[index])
-						diskList(redraw)
-					end))
-
-					table.insert(actions, #actions + 1, item("Erase all data", function()
-						drawPanel("Erase " .. label, {
-							{"This destroys everything on", address:sub(1, 8) .. "…"},
-							{"There is no undo.", ""},
-						}, "Press Y to confirm, any other key to cancel")
-
-						local code = waitForKey()
-
-						if code == 89 then -- Y
-							status("Erasing " .. label)
-							local ok, reason = pcall(function() proxy.remove("") end)
-
-							status(ok and "Erased" or ("Erase failed: " .. tostring(reason)))
-							waitForKey()
-						else
-							status("Cancelled")
-						end
-
-						diskList(redraw)
-					end))
-				end
-
-				table.insert(actions, #actions + 1, back(redraw))
-
-				drawMenu("Disk: " .. label, actions)
-			end
-		))
-
-		table.insert(elements, #elements, item("    " .. deviceKind(proxy) ..
-			"  " .. percent .. "% used  " .. humanBytes(total) .. "  " ..
-			(readOnly and "read-only" or "writable"), nil,
-			nil))
-	end
-
-	drawMenu("Disk utility", elements)
-end
-
---------------------------------------------------------------------------------
---- Diagnostics
---------------------------------------------------------------------------------
-
-local function diagnostics()
-	local elements = {
-		header("Diagnostics"),
-
-		item("Memory", function()
-			local total = computer.totalMemory()
-			local architecture = computer.getArchitecture()
-
-			drawPanel("Memory", {
-				{"Installed", humanBytes(total)},
-				{"Architecture", architecture or "unknown"},
-				{"Eeprom", hasComponent("eeprom") and "present" or "MISSING"},
-			}, "Press any key")
-			waitForKey()
-			diagnostics()
+local function maintenanceItems()
+	return {
+		newMenuElement("Clear boot device", function()
+			-- An empty string, never nil: the eeprom has to keep holding a string,
+			-- and a nil here stops the firmware from booting at all.
+			pcall(function() eepromSetData("") end)
+			status("Boot device cleared, the next boot will scan every disk")
+			menu("Maintenance", maintenanceItems())
 		end),
 
-		item("Graphics", function()
-			local lines = {
-				{"Bound screen", screenProxy and "yes" or "no"},
-				{"Resolution", screenWidth .. " x " .. screenHeight},
-				{"Colour depth", tostring(gpuProxy.getDepth())},
-				{"Max resolution", (function()
-					local w, h = gpuProxy.maxResolution()
-					return w .. " x " .. h
-				end)()},
-			}
+		newMenuElement("Restore bootloader from disk", function()
+			local proxy, address
 
-			drawPanel("Graphics", lines, "Press any key")
-			waitForKey()
-			diagnostics()
-		end),
+			for candidate in componentList(stringsFilesystem) do
+				local candidateProxy = componentProxy(candidate)
 
-		item("Eeprom", function()
-			local label = eepromProxy.getLabel() or "(none)"
-			local data = eepromProxy.getData()
-			local bootloader = eepromProxy.getBootloader and eepromProxy.getBootloader() or "(unknown)"
-
-			drawPanel("Eeprom", {
-				{"Label", label},
-				{"Boot address", data or "(unset)"},
-				{"Bootloader size", humanBytes(#(bootloader or ""))},
-				{"Config version", bootloader and #bootloader > 0 and "present" or "empty"},
-			}, "Press any key")
-			waitForKey()
-			diagnostics()
-		end),
-
-		item("Components", function()
-			local kinds = {"cpu", "ram", "gpu", "screen", "filesystem", "eeprom", "internet", "keyboard", "crafting", "robot", "modem"}
-			local lines = {}
-
-			for _, kind in ipairs(kinds) do
-				table.insert(lines, {kind, componentCount(kind)})
-			end
-
-			drawPanel("Components", lines, "Press any key")
-			waitForKey()
-			diagnostics()
-		end),
-
-		item("Self test", function()
-			local results = {}
-
-			table.insert(results, {"Screen", screenProxy and "pass" or "FAIL"})
-			table.insert(results, {"Gpu", gpuProxy and "pass" or "FAIL"})
-			table.insert(results, {"Eeprom", eepromProxy and "pass" or "FAIL"})
-			table.insert(results, {"Boot address", computer.getBootAddress() and "pass" or "unset"})
-			table.insert(results, {"Architecture", computer.getArchitecture() or "unknown"})
-
-			local writable = false
-
-			for address in componentList("filesystem") do
-				local proxy = componentProxy(address)
-
-				if proxy and not proxy.isReadOnly() then
-					writable = true
+				if candidateProxy and candidateProxy.exists("/EFI/Stub.lua") then
+					proxy, address = candidateProxy, candidate
 					break
 				end
 			end
 
-			table.insert(results, {"Writable disk", writable and "pass" or "FAIL"})
-
-			drawPanel("Self test", results, "Press any key")
-			waitForKey()
-			diagnostics()
-		end),
-
-		item("Energy", function()
-			local energy = computer.energy()
-			local maximum = computer.maxEnergy()
-
-			drawPanel("Energy", {
-				{"Charge", energy == math.huge and "unlimited" or ("" .. tostring(energy))},
-				{"Capacity", maximum == math.huge and "unlimited" or ("" .. tostring(maximum))},
-				{"Uptime", tostring(math.floor(uptime())) .. " s"},
-			}, "Press any key")
-			waitForKey()
-			diagnostics()
-		end),
-
-		back(function() mainMenu() end),
-	}
-
-	drawMenu("Diagnostics", elements)
-end
-
---------------------------------------------------------------------------------
---- Maintenance
---------------------------------------------------------------------------------
-
-local function maintenance()
-	local elements = {
-		header("Maintenance"),
-
-		item("Clear boot device", function()
-			-- Empty string, not nil: the EEPROM has to keep holding a string.
-			setBootAddress("")
-			status("Boot device cleared; the next boot will scan all disks")
-			maintenance()
-		end),
-
-		item("Restore bootloader from disk", function()
-			-- Reads /EFI/Stub.lua and writes it back. This is the recovery path if
-			-- the EEPROM is left without a working bootloader.
-			local path = "/EFI/Stub.lua"
-			local data = proxyRead(path)
-
-			if not data then
-				status("Cannot read " .. path)
-				maintenance()
+			if not proxy then
+				status("/EFI/Stub.lua not found on any disk")
 				return
 			end
 
-			local written = eepromProxy.set(data)
+			local handle = proxy.open("/EFI/Stub.lua", "rb")
+			local data, chunk = "", nil
+
+			if handle then
+				repeat
+					chunk = proxy.read(handle, mathHuge)
+					data = data .. (chunk or "")
+				until not chunk
+
+				proxy.close(handle)
+			end
+
+			if #data == 0 then
+				status("Stub is empty or unreadable")
+				return
+			end
+
+			local written = eepromSet(data)
 
 			if written == false then
 				status("EEPROM cannot hold " .. #data .. " bytes")
 			else
-				eepromProxy.setLabel("TheanOS EFI")
+				eepromSetLabel("TheanOS EFI")
 
-				local stored = eepromProxy.get()
+				local stored = eepromGet()
 
 				if type(stored) == "string" and #stored == #data then
 					status("Bootloader restored and verified")
 				else
-					status("Written but not readable. Do not reboot.")
+					status("Written but not readable, do not reboot")
 				end
 			end
-
-			maintenance()
 		end),
 
-		item("Reset bootloader", function()
-			drawPanel("Reset bootloader", {
-				{"Clears the stored bootloader script."},
-				{"The disk copy is untouched, so a", "recovery boot can still find it."},
-			}, "Press Y to confirm")
-
-			if waitForKey() == 89 then
-				pcall(function() eepromProxy.setBootloader("") end)
-				pcall(function() eepromProxy.setLabel(nil) end)
-				status("Bootloader reset. Reflash from Settings if needed.")
-			else
-				status("Cancelled")
-			end
-
-			maintenance()
-		end),
-
-		item("Boot order", function()
-			local address = eepromProxy.getData()
-
-			drawPanel("Boot order", {
-				{"Current device", address or "(unset — scan all)"},
-				{"", ""},
-				{"Disks are tried in component order", "when no device is set."},
-			}, "Press any key")
-			waitForKey()
-			maintenance()
-		end),
-
-		back(function() mainMenu() end),
+		newMenuBackElement()
 	}
-
-	drawMenu("Maintenance", elements)
 end
 
---------------------------------------------------------------------------------
---- Tools
---------------------------------------------------------------------------------
+local function aboutItems()
+	local version = "unknown"
+	local handle = eepromGetLabel() or stringsTheanOSEFI
 
-local function urlBoot()
-	local url = ""
-
-	clearScreen()
-	drawCentered(2, COLOR.title, "URL boot")
-	drawRectangle(1, 3, screenWidth, 3, COLOR.title)
-	drawText(3, 5, COLOR.dim, "https://")
-	drawText(12, 5, COLOR.text, url .. "_")
-
-	local internetProxy = componentProxy(componentList("internet")())
-
-	if not internetProxy then
-		drawText(3, 7, COLOR.error, "No internet component available.")
-		drawText(3, screenHeight - 1, COLOR.dim, "Press any key")
-		waitForKey()
-		return
-	end
-
-	local ok = true
-
-	while true do
-		local event = {pullSignal(0.5)}
-
-		if event[1] == "key_down" then
-			local code, char = event[4], event[3]
-
-			if code == 28 then
-				break
-			elseif code == 14 then
-				url = url:sub(1, -2)
-			elseif code == 27 then
-				ok = false
-				break
-			else
-				local character = unicode.char(char or 32)
-
-				if character:match("^[%w%d%p/%:%.%-%_~+]+$") and #url < 60 then
-					url = url .. character
-				end
-			end
-
-			drawText(3, 5, COLOR.dim, "https://")
-			drawText(12, 5, COLOR.text, url .. "_")
-		end
-	end
-
-	if not ok or url == "" then
-		return
-	end
-
-	clearStatus()
-	status("Downloading")
-
-	local connection, reason = internetProxy.request("https://" .. url, nil, nil)
-
-	if not connection then
-		status("Request failed: " .. tostring(reason))
-		waitForKey()
-		return
-	end
-
-	local data = ""
-	local chunk
-
-	while true do
-		chunk = connection.read(math.huge)
-
-		if chunk then
-			data = data .. chunk
-		else
-			break
-		end
-	end
-
-	connection.close()
-
-	local loaded, loadReason = load(data, url)
-
-	if not loaded then
-		status("Syntax error: " .. tostring(loadReason))
-		waitForKey()
-		return
-	end
-
-	clearScreen()
-	status("Running " .. url)
-
-	local ran, runReason = xpcall(loaded, debug.traceback)
-
-	if not ran then
-		status("Failed: " .. tostring(runReason))
-		print(tostring(runReason))
-		waitForKey()
-	end
-end
-
-local function memoryTest()
-	local results = {}
-	local step = 64
-
-	clearScreen()
-	drawCentered(2, COLOR.title, "Memory test")
-	drawRectangle(1, 3, screenWidth, 3, COLOR.title)
-
-	local y = 5
-
-	for _, size in ipairs({1024, 4096, 16384, 65536}) do
-		local blocks = {}
-
-		status("Testing " .. humanBytes(size * step) .. "…")
-
-		local ok = true
-
-		for _ = 1, step do
-			local block = {}
-
-			for i = 1, size do
-				block[i] = i
-			end
-
-			blocks[#blocks + 1] = block
-		end
-
-		for index = 1, step do
-			for i = 1, size do
-				if blocks[index][i] ~= i then
-					ok = false
-					break
-				end
-			end
-
-			if not ok then break end
-		end
-
-		blocks = nil
-
-		table.insert(results, {humanBytes(size * step), ok and "pass" or "FAIL"})
-		drawText(3, y, COLOR.dim, humanBytes(size * step))
-		drawText(20, y, ok and COLOR.accent or COLOR.error, ok and "pass" or "FAIL")
-		y = y + 1
-	end
-
-	drawText(3, screenHeight - 1, COLOR.dim, "Press any key")
-	waitForKey()
-end
-
-local function tools()
-	local elements = {
-		header("Tools"),
-		item("Boot from URL", urlBoot),
-		item("Memory test", memoryTest),
-		back(function() mainMenu() end),
+	return {
+		newMenuElement("TheanOS bootloader"),
+		newMenuElement(""),
+		newMenuElement("Version: 1.7.4"),
+		newMenuElement("Bootloader label: " .. tostring(handle)),
+		newMenuElement(""),
+		newMenuElement("This menu is served from /EFI/Boot.lua."),
+		newMenuElement("EEPROM holds only the small stub that loads it,"),
+		newMenuElement("so the bootloader can be updated without reflashing."),
+		newMenuElement(""),
+		newMenuBackElement()
 	}
-
-	drawMenu("Tools", elements)
 end
 
---------------------------------------------------------------------------------
---- About
---------------------------------------------------------------------------------
+-- Waiting 1 sec for user to press Alt key
+local deadline, eventData = uptime() + 1
 
-local function about()
-	local lines = {
-		{"TheanOS bootloader"},
-		"",
-		{"Version", "1.7.0"},
-		{"Loaded from", "/EFI/Boot.lua"},
-		{"Flashed stub", "/EFI/Stub.lua"},
-		{"", ""},
-		{"Memory", humanBytes(computer.totalMemory())},
-		{"Graphics", screenWidth .. " x " .. screenHeight .. " @ " .. tostring(gpuProxy.getDepth()) .. "bpp"},
-		{"Architecture", computer.getArchitecture() or "unknown"},
-		{"Uptime", tostring(math.floor(uptime())) .. " s"},
-		{"", ""},
-		{"Run diagnostics for a full report."},
-	}
+while uptime() < deadline do
+	eventData = { pullSignal(deadline - uptime()) }
 
-	drawPanel("About", lines, "Press any key")
-	waitForKey()
-	mainMenu()
-end
-
---------------------------------------------------------------------------------
---- Main menu
---------------------------------------------------------------------------------
-
-function mainMenu()
-	local address = eepromProxy.getData()
-	local booted = "not attempted"
-
-	local elements = {
-		header("TheanOS bootloader  ·  v1.7.0"),
-
-		item("Continue boot", function()
-			if continueBoot() then
-				return false
-			end
-
-			booted = "failed"
-			mainMenu()
-		end, booted),
-
-		item("Boot menu", function()
-			local devices = {header("Boot from"), back(function() mainMenu() end)}
-
-			for deviceAddress in componentList("filesystem") do
-				local proxy = componentProxy(deviceAddress)
-				local label = proxy.getLabel() or "Unnamed"
-				local isBoot = deviceAddress == eepromProxy.getData()
-
-				table.insert(devices, item(
-					(isBoot and "▶ " or "  ") .. label,
-					function()
-						bootDevice(deviceAddress)
+	if eventData[1] == stringsKeyDown and eventData[4] == 56 then
+		local utilities = {
+			newMenuElement("Disk utility", function()
+				local
+					restrict,
+					filesystems =
+					
+					function(text, limit)
+						return (#text < limit and text .. string.rep(" ", limit - #text) or text:sub(1, limit)) .. "   "
 					end,
-					deviceAddress:sub(1, 8) .. "…"
+					{ newMenuBackElement() }
+
+				local function updateFilesystems()
+					for i = 2, #filesystems do
+						table.remove(filesystems, 1)
+					end
+
+					for address in componentList(stringsFilesystem) do
+						local proxy = componentProxy(address)
+
+						local
+							label,
+							isReadOnly =
+
+							proxy.getLabel() or "Unnamed",
+							proxy.isReadOnly()
+
+						tableInsert(filesystems, 1,
+							newMenuElement(
+								(address == eepromGetData() and "> " or "  ") ..
+								restrict(label, 10) ..
+								restrict(proxy.spaceTotal() > 1048575 and "HDD" or proxy.spaceTotal() > 65535 and "FDD" or "SYS", 3) ..
+								restrict(isReadOnly and "R  " or "R/W", 3) ..
+								restrict(math.ceil(proxy.spaceUsed() / proxy.spaceTotal() * 100) .. "%", 4) ..
+								address:sub(1, 8) .. "…",
+								
+								function()
+									local elements = {
+										newMenuElement(
+											"Set as bootable",
+											function()
+												eepromSetData(address)
+												updateFilesystems()
+											end,
+											1
+										),
+
+										newMenuBackElement()
+									}
+
+									if not isReadOnly then
+										tableInsert(elements, 2, newMenuElement(
+											stringsChangeLabel,
+											function()
+												pcall(proxy.setLabel, input(stringsChangeLabel, "New value: "))
+												updateFilesystems()
+											end,
+											1
+										))
+
+										tableInsert(elements, 3, newMenuElement(
+											"Erase",
+											function()
+												status("Erasing " .. address)
+												proxy.remove("")
+												updateFilesystems()
+											end,
+											1
+										))
+									end
+
+									menu(label .. " (" .. address .. ")", elements)
+								end
+							)
+						)
+					end
+				end
+
+				updateFilesystems()
+				menu("Select filesystem", filesystems)
+			end),
+
+			newMenuBackElement()
+		}
+
+		-- Boot actions, above the utilities. "Continue" is the default path and is
+		-- listed first so it is what a stray Enter press lands on.
+		tableInsert(utilities, 1, newMenuElement("Continue boot", function()
+			menuExit = true
+		end, 1))
+
+		tableInsert(utilities, 2, newMenuElement("Boot from device", function()
+			local devices = { newMenuBackElement() }
+			local added = 0
+
+			for address in componentList(stringsFilesystem) do
+				local proxy = componentProxy(address)
+				local label = proxy.getLabel() or "Unnamed"
+				local total = proxy.spaceTotal()
+				local used = proxy.spaceUsed()
+				local percent = total > 0 and mathFloor(used / total * 100) or 0
+
+				added = added + 1
+
+				tableInsert(devices, #devices, newMenuElement(
+					(address == eepromGetData() and stringsBootMark or "  ") .. label,
+					function()
+						eepromSetData(address)
+						computer.setBootAddress(address)
+						menuExit = true
+					end,
+					1
+				))
+
+				tableInsert(devices, #devices, newMenuElement(
+					"      " .. (total > 1048575 and "HDD" or (total > 65535 and "FDD" or "SYS")) ..
+					"  " .. percent .. "%  " .. tostring(total) .. " bytes"
 				))
 			end
 
-			if #devices == 2 then
-				table.insert(devices, item("  (no disks found)", nil))
+			if added == 0 then
+				tableInsert(devices, #devices, newMenuElement("  (no disks found)"))
 			end
 
-			drawMenu("Boot menu", devices)
-		end),
+			menu("Boot from device", devices)
+		end))
 
-		item("Disk utility", function() diskList(function() mainMenu() end) end),
-		item("Diagnostics", diagnostics),
-		item("Maintenance", maintenance),
-		item("Tools", tools),
-		item("About", about),
+		tableInsert(utilities, 3, newMenuElement("Diagnostics", function()
+			menu("Diagnostics", diagnosticsItems())
+		end))
 
-		item("Reboot", function() computer.shutdown() end),
-		item("Power off", function() computer.shutdown() end),
-	}
+		tableInsert(utilities, 4, newMenuElement("Maintenance", function()
+			menu("Maintenance", maintenanceItems())
+		end))
 
-	drawMenu("TheanOS", elements)
+		tableInsert(utilities, 5, newMenuElement("About", function()
+			menu("About", aboutItems())
+		end))
+
+		if internetAddress then	
+			tableInsert(utilities, 6, newMenuElement("System recovery", function()
+				internetExecute("https://tinyurl.com/29urhz7z")
+			end))
+			
+			tableInsert(utilities, 7, newMenuElement(stringsURLBoot, function()
+				internetExecute(input(stringsURLBoot, "Address: "))
+			end))
+		end
+
+		tableInsert(utilities, #utilities, newMenuElement("Reboot", function()
+			computer.shutdown()
+		end))
+
+		menu(stringsTheanOSEFI .. "  v1.7.4", utilities)
+
+		menuExit = false
+	end
 end
 
---------------------------------------------------------------------------------
---- Entry point
---------------------------------------------------------------------------------
+-- Trying to boot from previously selected fs or from any available
+local bootProxy = componentProxy(eepromGetData())
 
-eepromProxy = componentProxy(componentList("eeprom")())
-gpuProxy = componentProxy(componentList("gpu")())
-pcall(function() gpuProxy = gpuProxy or component.gpu end)
+if not (bootProxy and boot(bootProxy)) then
+	local function tryBootFromAny()
+		for address in componentList(stringsFilesystem) do
+			bootProxy = componentProxy(address)
 
-if not gpuProxy then
-	print("TheanOS bootloader: no GPU, cannot draw.")
-	return
-end
-
-bindScreen()
-
-local function waitForBootKey()
-	-- A short window, because nobody wants a menu on every boot. Two seconds is
-	-- long enough to hit a key and short enough not to be in the way.
-	local deadline = uptime() + 2
-
-	while uptime() < deadline do
-		local event = {pullSignal(deadline - uptime())}
-
-		if event[1] == "key_down" then
-			local code = event[4]
-
-			-- Alt, or Esc to be discoverable without knowing the shortcut.
-			if code == 56 or code == 27 then
-				return true
+			if boot(bootProxy) then
+				computer.shutdown()
+			else
+				bootProxy = nil
 			end
+		end
+
+		if not bootProxy then
+			status("Not boot sources found")
 		end
 	end
 
-	return false
-end
+	tryBootFromAny()
 
-if waitForBootKey() then
-	mainMenu()
-else
-	if not continueBoot() then
-		clearScreen()
-		drawCentered(2, COLOR.title, "TheanOS bootloader")
-		drawCentered(5, COLOR.error, "No bootable disk found.")
-		drawCentered(7, COLOR.dim, "Press Alt for the boot menu.")
-
-		while true do
-			local event = {pullSignal()}
-
-			if event[1] == "component_added" and event[3] == "filesystem" then
-				if continueBoot() then return end
-			elseif event[1] == "key_down" and event[4] == 56 then
-				mainMenu()
-			end
+	-- Waiting for any fs component available
+	while 1 do
+		if pullSignal() == stringsComponentAdded then
+			tryBootFromAny()
 		end
 	end
 end
