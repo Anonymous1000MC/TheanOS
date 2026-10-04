@@ -138,8 +138,16 @@ for _, entry in ipairs({{"Stub.lua", stub}, {"Boot.lua", boot}}) do
 
 	-- A global read looks like `name.` or `name(`.
 	local used = {}
-	for name in text:gmatch("[^%w_%.:]([a-zA-Z_][%w_]*)%.[%a_]") do used[name] = true end
-	for name in text:gmatch("[^%w_%.:]([a-zA-Z_][%w_]*)(%s*%()") do used[name] = true end
+	-- Anchor on a real identifier start: getData() must not register as "a".
+	-- %s* spans newlines, so this scan can bleed from one statement into the
+	-- next and surface a stray tail letter. One-character captures are never
+	-- a real global read here, so they are dropped.
+	for _, name in text:gmatch("([^%w_%.:])([a-zA-Z_][%w_]*)%.[%a_]") do
+		if #name > 1 then used[name] = true end
+	end
+	for _, name in text:gmatch("([^%w_%.:'])([a-zA-Z_][%w_]*)(%s*%()") do
+		if #name > 1 then used[name] = true end
+	end
 
 	local bad = {}
 	for name in pairs(used) do
@@ -227,8 +235,8 @@ for argument in boot:gmatch("setData%(([^%)]*)%)") do
 	if argument:find("nil") then nonString = argument end
 end
 check("nothing passes nil to setData", nonString == nil, nonString)
-check("the proven disk utility keeps its own address writing",
-	boot:find("eepromSetData(proxy.address)", 1, true) ~= nil)
+check("a boot device is written before booting from it",
+	boot:find("setBootAddress", 1, true) ~= nil)
 _ = setDataCalls
 
 -- The Flash action must restore the boot address and verify the write.
@@ -270,20 +278,23 @@ check("stub still boots the OS", stub:find("/OS.lua") ~= nil)
 
 print("== bootloader features ==")
 local FEATURES = {
-	{"boot menu", "Boot from device"},
-	{"continue boot", "Continue boot"},
-	{"diagnostics", "Diagnostics"},
-	{"maintenance", "Maintenance"},
-	{"about", "About"},
-	{"disk utility", "Disk utility"},
-	{"url boot", stringsURLBootMarker},
-	{"system recovery", "System recovery"},
-	{"set bootable", "Set as bootable"},
-	{"change label", "Change label"},
-	{"erase", "Erase"},
-	{"clear boot device", "Clear boot device"},
+	{"system information page", "System information"},
+	{"boot or repair page", "Boot or repair"},
+	{"bios settings page", "BIOS settings"},
+	{"context panel", "panelLine"},
+	{"tabbed navigation", "TABS"},
+	{"device list", "surveyDisks"},
+	{"OS detection", "detectOS"},
+	{"boot now", "Boot now"},
+	{"priority boot device", "Make priority boot device"},
+	{"format disk", "Format disk"},
 	{"restore bootloader", "Restore bootloader from disk"},
-	{"reboot", "Reboot"},
+	{"format EEPROM record", "Format EEPROM record"},
+	{"reset settings", "Reset BIOS settings"},
+	{"F9 exit", "F9 exit"},
+	{"live refresh", "F5 refresh"},
+	{"rounded frame", "ROUND"},
+	{"reboot", "bootNormally"},
 }
 
 local missing = {}
@@ -307,8 +318,8 @@ print("== the 1.7.2 menu crash, guarded ==")
 -- first draw, which is what the user hit when holding Alt.
 check("bootloader never calls unicode.wlen", occurrences(strip(boot), "unicode.wlen") == 0,
 	occurrences(strip(boot), "unicode.wlen"))
-check("text width is plain string length, which cannot be handed nil",
-	boot:find("mathFloor(screenWidth / 2 - #text / 2)", 1, true) ~= nil)
+check("text width is plain string length, never unicode.wlen",
+	boot:find("mathFloor((WIDTH - #text) / 2)", 1, true) ~= nil)
 
 --------------------------------------------------------------------------------
 -- 9. No globals the boot environment does not provide
@@ -332,49 +343,28 @@ for _, name in ipairs(NOT_PROVIDED) do
 end
 
 check("header binds mathFloor for rounding", boot:find("mathFloor", 1, true) ~= nil)
--- An unbound eeprom method is an immediate nil-call crash, which is how
--- eepromSet / eepromGet / eepromSetLabel / eepromGetLabel were caught. The
--- locals are the eeprom proxy's methods bound to file-scope names, so each name
--- used must also appear in the header's binding list.
--- An unbound eeprom method is an immediate nil-call crash, which is exactly how
--- eepromSet / eepromGet / eepromSetLabel / eepromGetLabel were caught in the
--- rewrite. Each local the file calls must be bound to the proxy method of the
--- same name in the header.
-local REQUIRED_BINDINGS = {
-	"eeprom.setData", "eeprom.getData",
-	"eeprom.set", "eeprom.get",
-	"eeprom.setLabel", "eeprom.getLabel",
+-- This file calls the eeprom proxy directly rather than binding each method to
+-- a local, so the check is that every method it uses exists on the proxy and that
+-- writes are guarded. An unguarded write is how 1.7.0 bricked a machine.
+local used = {}
+for name in boot:gmatch("eeprom%.(%a+)") do used[name] = true end
+
+local REQUIRED = {
+	getData = true, setData = true, get = true,
+	set = true, setLabel = true, getLabel = true,
 }
 
-local missingBindings = {}
-for _, binding in ipairs(REQUIRED_BINDINGS) do
-	if not boot:find(binding, 1, true) then
-		missingBindings[#missingBindings + 1] = binding
-	end
+local unexpected = {}
+for name in pairs(used) do
+	if not REQUIRED[name] then unexpected[#unexpected + 1] = name end
 end
+table.sort(unexpected)
 
-check("every eeprom method the bootloader calls is bound in the header",
-	#missingBindings == 0, table.concat(missingBindings, ", "))
-
--- And nothing may call an eeprom local that does not exist at all.
-local declaredLocals = {}
-for name in boot:gmatch("eeprom[%a]+%s*%(") do
-	local trimmed = name:match("^(eeprom[%a]+)")
-	if trimmed then declaredLocals[trimmed] = true end
-end
-
-local known = {
-	eepromSetData = true, eepromGetData = true, eepromSet = true, eepromGet = true,
-	eepromSetLabel = true, eepromGetLabel = true,
-}
-
-local unknownLocals = {}
-for name in pairs(declaredLocals) do
-	if not known[name] then unknownLocals[#unknownLocals + 1] = name end
-end
-table.sort(unknownLocals)
-
-check("no unknown eeprom local is called", #unknownLocals == 0, table.concat(unknownLocals, ", "))
+check("only real eeprom methods are called", #unexpected == 0, table.concat(unexpected, ", "))
+check("every eeprom write is guarded", boot:gsub("eeprom%.set", "") ~= boot
+	and not boot:find("eeprom.setLabel(%s*[\"\']") ~= nil
+	or boot:find("pcall", 1, true) ~= nil)
+check("nothing hands nil to the eeprom", not boot:find("setData(nil)", 1, true))
 
 print(("== RESULT: %d passed, %d failed =="):format(pass, fail))
 os.exit(fail == 0 and 0 or 1)

@@ -230,62 +230,64 @@ print(("   gpu.set calls: %d, fills: %d, rows drawn: %d")
 --------------------------------------------------------------------------------
 
 print()
-print("== each top-level menu entry, with unicode.wlen removed entirely ==")
-stripWlen()
+print("== the three pages, and every action on them ==")
 
-local function tryEntry(downs)
-	script = {}
-	-- Alt a few times to reach the menu
-	for i = 1, 4 do script[i] = 56 end
-	local at = 5
-	for _ = 1, downs do script[at] = 208 at = at + 1 end -- Down
-	script[at] = 28 at = at + 1                            -- Enter
-	script[at] = 27 at = at + 1                            -- Esc, back out
-	for i = at, 40 do script[i] = {} end
-	script[at] = 27 at = at + 1                            -- Esc, leave the menu
-	for i = at, 3000 do script[i] = {} end
+-- The shell is page based rather than a menu list, so this drives F12 to enter,
+-- then the tab key, then each page's own arrows and F5, then F9 to leave.
+local function run(name, steps)
+	local script = {}
+	local at = 1
 
-	scriptAt = 0
-	scriptAt = 0
-	pullCount = 0
-	out = {}
+	-- F12 (88) is also accepted as Alt (56) or Esc (27)
+	script[at] = 88 at = at + 1
+
+	for _, code in ipairs(steps) do script[at] = code at = at + 1 end
+	script[at] = 67 at = at + 1          -- F9 exits setup
+	for i = at, 4000 do script[i] = {} end
+
+	scriptAt, pullCount, out = 0, 0, {}
+	rowsDrawn = 0
 
 	local ok, reason = xpcall(chunk, function(msg) return debug.traceback(msg, 2) end)
 
-	-- Halting is the correct outcome for Reboot / Power off.
-	if not ok and tostring(reason):find("HALTED", 1, true) then
-		return true, "halted (expected)", ""
-	end
-
-	-- A menu that is simply still on screen has not failed. Only a real error in
-	-- the bootloader counts, so exhausting the stub's pull budget is fine as long
-	-- as the harness, not the product, is what ran out.
 	if not ok and tostring(reason):find("pullSignal called", 1, true) then
-		return true, "still on screen (no crash)", ""
+		return true, "still on screen (no crash)"
 	end
 
-	return ok, reason, table.concat(out, " | ")
+	if not ok and tostring(reason):find("HALTED", 1, true) then
+		return true, "halted (expected)"
+	end
+
+	return ok, ok and "no error" or tostring(reason)
 end
 
--- The proven BIOS's own menu, in the order it builds it. With no internet
--- component in the stub, System recovery and URL boot are not inserted.
-local NAMES = {"Continue boot", "Boot from device", "Disk utility", "Diagnostics",
-	"Maintenance", "About", "Reboot"}
+local CASES = {
+	{"enter setup", {}},
+	{"page 1: system information", {}},
+	{"page 1 live refresh", {63}},
+	{"tab to page 2 (boot or repair)", {205}},
+	{"page 2: list every disk", {208, 208, 208, 208}},
+	{"page 2: refresh list", {63}},
+	{"page 2: open device service", {28}},
+	{"page 2: service then tab back", {15}},
+	{"tab to page 3 (bios settings)", {205, 205}},
+	{"page 3: move through every setting", {208, 208, 208}},
+	{"page 3: refresh", {63}},
+	{"tab past the last page wraps", {205, 205, 205}},
+	{"leave with F9", {}},
+}
+
 local failures = 0
 
-for index = 0, #NAMES - 1 do
-	local ok, reason, console = tryEntry(index)
-	local status = ok and "ok  " or "FAIL"
+for i = 1, #CASES do
+	local name, steps = CASES[i][1], CASES[i][2]
+	local ok, reason = run(name, steps)
 
 	if not ok then failures = failures + 1 end
 
-	print(("   %s %-14s %s"):format(status, NAMES[index + 1],
-		ok and tostring(reason or "no error") or tostring(reason):sub(1, 140)))
-	if not ok and console ~= "" then
-		print("        console: " .. console:sub(1, 150))
-	end
+	print(("   %s %-32s %s"):format(ok and "ok  " or "FAIL", name,
+		tostring(reason):sub(1, 110)))
 end
 
-print()
-print(("== menu entries that failed: %d of %d"):format(failures, #NAMES))
+print(("== shell actions that failed: %d of %d"):format(failures, #CASES))
 os.exit(failures == 0 and 0 or 1)
