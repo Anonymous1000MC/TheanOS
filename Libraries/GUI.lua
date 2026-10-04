@@ -8,6 +8,7 @@ local paths = require("Paths")
 local text = require("Text")
 local number = require("Number")
 
+
 -----------------------------------------------------------------------------------------
 
 local GUI = {
@@ -342,12 +343,18 @@ local function containerDraw(container)
 
 	if boundsX1 then
 		screen.setDrawLimit(boundsX1, boundsY1, boundsX2, boundsY2)
-		
-		for i = 1, #container.children do
-			child = container.children[i]
-			
+
+		-- Hoisted out of the loop: identical for every child, and these were being
+		-- re-read from the container on each one, on every frame.
+		local children = container.children
+		local containerX, containerY = container.x, container.y
+
+		for i = 1, #children do
+			child = children[i]
+
 			if not child.hidden then
-				child.x, child.y = container.x + child.localX - 1, container.y + child.localY - 1
+				-- Arithmetic left exactly as it was; only the field reads are hoisted.
+				child.x, child.y = containerX + child.localX - 1, containerY + child.localY - 1
 				child:draw()
 			end
 		end
@@ -1646,41 +1653,69 @@ local function layoutGetCalculatedSize(array, index, dependency)
 end
 
 local function layoutUpdate(layout)
+	-- Resolved once per layout update rather than once per child. These sit here
+	-- instead of at file scope because this file is a single chunk that is close
+	-- to Lua's 200-local limit, and a local declared inside a function does not
+	-- count against that.
+	local mathMax, numberRound = math.max, number.round
+	local directionHorizontal = GUI.DIRECTION_HORIZONTAL
+	local getAlignmentCoordinates, getMarginCoordinates =
+		GUI.getAlignmentCoordinates, GUI.getMarginCoordinates
+
 	local columnPercentageTotalSize, rowPercentageTotalSize = layout.width - layoutGetAbsoluteTotalSize(layout.columnSizes), layout.height - layoutGetAbsoluteTotalSize(layout.rowSizes)
-	for row = 1, #layout.rowSizes do
-		layoutGetCalculatedSize(layout.rowSizes, row, rowPercentageTotalSize)
-		for column = 1, #layout.columnSizes do
-			layoutGetCalculatedSize(layout.columnSizes, column, columnPercentageTotalSize)
-			layout.cells[row][column].childrenWidth, layout.cells[row][column].childrenHeight = 0, 0
+	-- Hoisted for the whole function: layoutGetCalculatedSize only rewrites
+	-- calculatedSize on entries that already exist, so these array lengths cannot
+	-- change from here on. Previously #layout.rowSizes and #layout.columnSizes
+	-- were recomputed inside the per-child loop.
+	local rowTotal, columnTotal = #layout.rowSizes, #layout.columnSizes
+	local rowSizes, columnSizes, cells = layout.rowSizes, layout.columnSizes, layout.cells
+
+	-- A column's calculatedSize depends only on that column and the layout width,
+	-- never on the row, so it is computed once here rather than once per
+	-- (row, column) pair.
+	for column = 1, columnTotal do
+		layoutGetCalculatedSize(columnSizes, column, columnPercentageTotalSize)
+	end
+
+	for row = 1, rowTotal do
+		layoutGetCalculatedSize(rowSizes, row, rowPercentageTotalSize)
+
+		local rowCells = cells[row]
+
+		for column = 1, columnTotal do
+			local gridCell = rowCells[column]
+			gridCell.childrenWidth, gridCell.childrenHeight = 0, 0
 		end
 	end
 
 	-- Подготавливаем объекты к расположению и подсчитываем тотальные размеры
 	local child, layoutRow, layoutColumn, cell
-	for i = 1, #layout.children do
-		child = layout.children[i]
+	local children = layout.children
+
+	for i = 1, #children do
+		child = children[i]
 		
 		if not child.hidden then
 			layoutRow, layoutColumn = child.layoutRow, child.layoutColumn
 
 			-- Проверка на позицию в сетке
-			if layoutRow >= 1 and layoutRow <= #layout.rowSizes and layoutColumn >= 1 and layoutColumn <= #layout.columnSizes then
-				cell = layout.cells[layoutRow][layoutColumn]
+			if layoutRow >= 1 and layoutRow <= rowTotal and layoutColumn >= 1 and layoutColumn <= columnTotal then
+				cell = cells[layoutRow][layoutColumn]
 				-- Авто-фиттинг объектов
 				if cell.horizontalFitting then
-					child.width = number.round(layout.columnSizes[layoutColumn].calculatedSize - cell.horizontalFittingRemove)
+					child.width = numberRound(columnSizes[layoutColumn].calculatedSize - cell.horizontalFittingRemove)
 				end
 
 				if cell.verticalFitting then
-					child.height = number.round(layout.rowSizes[layoutRow].calculatedSize - cell.verticalFittingRemove)
+					child.height = numberRound(rowSizes[layoutRow].calculatedSize - cell.verticalFittingRemove)
 				end
 
 				-- Направление и расчет размеров
-				if cell.direction == GUI.DIRECTION_HORIZONTAL then
+				if cell.direction == directionHorizontal then
 					cell.childrenWidth = cell.childrenWidth + child.width + cell.spacing
-					cell.childrenHeight = math.max(cell.childrenHeight, child.height)
+					cell.childrenHeight = mathMax(cell.childrenHeight, child.height)
 				else
-					cell.childrenWidth = math.max(cell.childrenWidth, child.width)
+					cell.childrenWidth = mathMax(cell.childrenWidth, child.width)
 					cell.childrenHeight = cell.childrenHeight + child.height + cell.spacing
 				end
 			else
@@ -1690,24 +1725,31 @@ local function layoutUpdate(layout)
 	end
 
 	-- Высчитываем стартовую позицию объектов ячейки
+	-- Reuses rowTotal/columnTotal/rowSizes/columnSizes/cells hoisted above: this
+	-- loop cannot change any of them, and it ran once per cell.
 	local x, y = 1, 1
-	for row = 1, #layout.rowSizes do
-		for column = 1, #layout.columnSizes do
-			cell = layout.cells[row][column]
-			cell.x, cell.y = GUI.getAlignmentCoordinates(
+	local directionVertical = GUI.DIRECTION_VERTICAL
+
+	for row = 1, rowTotal do
+		local rowSize, rowCells = rowSizes[row].calculatedSize, cells[row]
+
+		for column = 1, columnTotal do
+			local columnSize = columnSizes[column].calculatedSize
+			cell = rowCells[column]
+			cell.x, cell.y = getAlignmentCoordinates(
 				x,
 				y,
-				layout.columnSizes[column].calculatedSize,
-				layout.rowSizes[row].calculatedSize,
+				columnSize,
+				rowSize,
 				cell.horizontalAlignment,
 				cell.verticalAlignment,
-				cell.childrenWidth - (cell.direction == GUI.DIRECTION_HORIZONTAL and cell.spacing or 0),
-				cell.childrenHeight - (cell.direction == GUI.DIRECTION_VERTICAL and cell.spacing or 0)
+				cell.childrenWidth - (cell.direction == directionHorizontal and cell.spacing or 0),
+				cell.childrenHeight - (cell.direction == directionVertical and cell.spacing or 0)
 			)
 
 			-- Учитываем отступы от краев ячейки
 			if cell.horizontalMargin ~= 0 or cell.verticalMargin ~= 0 then
-				cell.x, cell.y = GUI.getMarginCoordinates(
+				cell.x, cell.y = getMarginCoordinates(
 					cell.x,
 					cell.y,
 					cell.horizontalAlignment,
@@ -1717,20 +1759,23 @@ local function layoutUpdate(layout)
 				)
 			end
 
-			x = x + layout.columnSizes[column].calculatedSize
+			x = x + columnSize
 		end
 
-		x, y = 1, y + layout.rowSizes[row].calculatedSize
+		x, y = 1, y + rowSize
 	end
 
 	-- Размещаем все объекты
-	for i = 1, #layout.children do
-		child = layout.children[i]
+	-- Same hoists as the loop above: this one also runs once per child.
+	local mathFloor = math.floor
+
+	for i = 1, #children do
+		child = children[i]
 		
 		if not child.hidden then
-			cell = layout.cells[child.layoutRow][child.layoutColumn]
+			cell = cells[child.layoutRow][child.layoutColumn]
 			
-			child.localX, cell.localY = GUI.getAlignmentCoordinates(
+			child.localX, cell.localY = getAlignmentCoordinates(
 				cell.x,
 				cell.y,
 				cell.childrenWidth,
@@ -1741,11 +1786,11 @@ local function layoutUpdate(layout)
 				child.height
 			)
 
-			if cell.direction == GUI.DIRECTION_HORIZONTAL then
-				child.localX, child.localY = math.floor(cell.x), math.floor(cell.localY)
+			if cell.direction == directionHorizontal then
+				child.localX, child.localY = mathFloor(cell.x), mathFloor(cell.localY)
 				cell.x = cell.x + child.width + cell.spacing
 			else
-				child.localX, child.localY = math.floor(child.localX), math.floor(cell.y)
+				child.localX, child.localY = mathFloor(child.localX), mathFloor(cell.y)
 				cell.y = cell.y + child.height + cell.spacing
 			end
 		end

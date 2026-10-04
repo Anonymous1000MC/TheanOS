@@ -62,6 +62,14 @@ local
 	unicode.wlen,
 	{};
 
+-- Plain string primitives, localized on their own. They cannot go in the block
+-- above because a Lua local namelist takes "Name {, Name}" followed by a single
+-- "= explist"; a "name = value" pair in the middle of it will not parse.
+--
+-- drawText uses these in place of the Unicode equivalents whenever the text is
+-- ASCII, where both produce the same result but these are one C call each.
+local stringSub, stringFind = string.sub, string.find
+
 --------------------------------------------------------------------------------
 
 local function getIndex(x, y)
@@ -583,7 +591,42 @@ local function drawText(x, y, textColor, text, transparency)
 		charWlen =
 			1,
 			bufferWidth * (y - 1) + x
-	
+
+	-- Fast path: if no byte is >= 128 then the string is pure ASCII, so bytes and
+	-- characters coincide and every character is exactly one cell wide. That lets
+	-- the Unicode machinery be skipped entirely.
+	--
+	-- The test is a single C-level scan of the whole string. It is worth it: on
+	-- a full 80x25 repaint this loop runs about 2000 times, and unicode.sub is
+	-- far heavier per call than string.sub. Anything containing a byte >= 128
+	-- falls through to the general path below, which stays byte-for-byte
+	-- identical to the original implementation.
+	--
+	-- Every byte of a multi-byte UTF-8 sequence is >= 128, so asking for those
+	-- directly is equivalent to asking for "not ASCII" -- and it keeps an
+	-- embedded \0 out of the character class, which is not portable across the
+	-- Lua versions OpenComputers reports.
+	if type(text) == "string" and not stringFind(text, "[\128-\255]") then
+		for charIndex = 1, #text do
+			-- Width is 1, so the general path's "x + charWlen - 1 <= drawLimitX2"
+			-- reduces to "x <= drawLimitX2", and the continuation cells that a
+			-- wide character would fill in are simply not needed.
+			if x >= drawLimitX1 and x <= drawLimitX2 then
+				if transparency then
+					newFrameForegrounds[screenIndex] = colorBlend(newFrameBackgrounds[screenIndex], textColor, transparency)
+				else
+					newFrameForegrounds[screenIndex] = textColor
+				end
+
+				newFrameChars[screenIndex] = stringSub(text, charIndex, charIndex)
+			end
+
+			x, screenIndex = x + 1, screenIndex + 1
+		end
+
+		return
+	end
+
 	for charIndex = 1, unicodeLen(text) do
 		char = unicodeSub(text, charIndex, charIndex)
 		charWlen = unicodeWlenCache[char]
