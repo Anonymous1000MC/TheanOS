@@ -23,10 +23,6 @@ local
 	colorsText,
 	colorsSelectionBackground,
 	colorsSelectionText,
-	colorsMuted,
-	colorsAccent,
-	colorsBorder,
-	colorsHeaderText,
 
 	OSList,
 	bindGPUToScreen,
@@ -61,14 +57,11 @@ local
 	math.huge,
 	math.floor,
 
-	0x1E1E1E,
+	0x2D2D2D,
 	0xE1E1E1,
-	0x2D5A8C,
-	0xFFFFFF,
-	0x8A8A8A,
-	0x66DB80,
-	0x4A4A4A,
-	0xFFFFFF
+	0x878787,
+	0x878787,
+	0xE1E1E1
 
 local
 	eeprom,
@@ -149,13 +142,11 @@ function(x, y, foreground, text)
 	gpuSet(x, y, text)
 end,
 
-function(text, callback, breakLoop, value, header)
+function(text, callback, breakLoop)
 	return {
 		s = text,
 		c = callback,
-		b = breakLoop,
-		v = value,
-		h = header
+		b = breakLoop
 	}
 end,
 
@@ -164,16 +155,11 @@ function(y, foreground, text)
 end,
 
 function(y, title)
+	y = mathFloor(screenHeight / 2 - y / 2)
 	drawRectangle(1, 1, screenWidth, screenHeight, colorsBackground)
+	drawCentrizedText(y, colorsTitle, title)
 
-	drawRectangle(1, 1, screenWidth, 3, colorsTitle)
-	drawCentrizedText(2, colorsHeaderText, title)
-
-	for x = 1, screenWidth do
-		drawText(x, 4, colorsBorder, "\u{2500}")
-	end
-
-	return 6
+	return y + 2
 end,
 
 function(statusText, needWait)
@@ -256,39 +242,22 @@ function(title, items)
 	local selectedIndex = 1
 
 	while 1 do
-		local y, x, text, e = drawTitle(#items + 4, title)
-
+		local y, x, text, e = drawTitle(#items + 2, title)
+		
 		for i = 1, #items do
-			local item = items[i]
-
-			if item.h then
-				drawText(4, y, colorsMuted, item.s)
+			text = "  " .. items[i].s .. "  "
+			x = mathFloor(screenWidth / 2 - #text / 2)
+			
+			if i == selectedIndex then
+				gpuSetBackground(colorsSelectionBackground)
+				drawText(x, y, colorsSelectionText, text)
+				gpuSetBackground(colorsBackground)
 			else
-				text, x = item.s, 4
-
-				if i == selectedIndex then
-					-- A bar across the row reads much better than recolouring the
-					-- text, and it shows how wide the panel is.
-					drawRectangle(2, y, screenWidth - 3, 1, colorsSelectionBackground)
-					drawText(x, y, colorsSelectionText, text)
-
-					if item.v then
-						drawText(screenWidth - 4 - #item.v, y, colorsAccent, item.v)
-					end
-				else
-					drawText(x, y, colorsText, text)
-
-					if item.v then
-						drawText(screenWidth - 4 - #item.v, y, colorsMuted, item.v)
-					end
-				end
+				drawText(x, y, colorsText, text)
 			end
-
+			
 			y = y + 1
 		end
-
-		drawCentrizedText(screenHeight - 1, colorsMuted,
-			"\u{2191}\u{2193} select    Enter confirm    Esc back")
 
 		e = { pullSignal() }
 
@@ -439,97 +408,22 @@ end
 
 local function diagnosticsItems()
 	local disks, total, used, percent = deviceSummary()
-	local memory = safeTotalMemory()
-	local boot = eepromGetData()
 
-	return {
-		newMenuElement("\u{2500} Storage \u{2500}", nil, nil, nil, true),
-		newMenuElement("Disks found", nil, nil, tostring(disks)),
-		newMenuElement("Used", nil, nil, tostring(used) .. " B"),
-		newMenuElement("Total", nil, nil, tostring(total) .. " B"),
-		newMenuElement("Usage", nil, nil, tostring(percent) .. "%"),
-		newMenuElement("", nil, nil, nil, true),
-		newMenuElement("\u{2500} Hardware \u{2500}", nil, nil, nil, true),
-		newMenuElement("Memory", nil, nil, memory and (tostring(mathFloor(memory / 1024)) .. " KB") or "n/a"),
-		newMenuElement("Screen", nil, nil, tostring(screenWidth) .. " x " .. tostring(screenHeight)),
-		newMenuElement("Eeprom label", nil, nil, eepromGetLabel() or "none"),
-		newMenuElement("Boot device", nil, nil, boot or "not set"),
-		newMenuElement("", nil, nil, nil, true),
-		newMenuElement("\u{2500} Self test \u{2500}", nil, nil, nil, true),
-		newMenuElement("Gpu present", nil, nil, gpu and "pass" or "FAIL"),
-		newMenuElement("Eeprom present", nil, nil, eeprom and "pass" or "FAIL"),
-		newMenuElement("Screen bound", nil, nil, screenWidth > 1 and "pass" or "FAIL"),
-		newMenuElement("Disk found", nil, nil, disks > 0 and "pass" or "FAIL"),
-		newMenuElement("Boot device set", nil, nil, boot and "pass" or "unset"),
-		newMenuBackElement()
+	local items = {
+		newMenuElement("Disks: " .. tostring(disks)),
+		newMenuElement("Space: " .. tostring(used) .. " / " .. tostring(total) .. " bytes"),
+		newMenuElement("Usage: " .. tostring(percent) .. "%"),
 	}
-end
 
--- The disk list, factored out of the inline menu entry it used to live in, so it
--- can be reached from more than one place.
-local function diskUtilityItems()
-	local
-		restrict,
-		filesystems =
+	local memory = safeTotalMemory()
+	tableInsert(items, #items, newMenuElement("Memory: " .. (memory and (tostring(mathFloor(memory / 1024)) .. " KB") or "not reported")))
 
-		function(text, limit)
-			return (#text < limit and text .. string.rep(" ", limit - text:len()) or text:sub(1, limit)) .. "   "
-		end,
-		{ newMenuBackElement() }
+	tableInsert(items, #items, newMenuElement("Boot device: " .. (eepromGetData() or "not set")))
+	tableInsert(items, #items, newMenuElement("Screen: " .. tostring(screenWidth) .. " x " .. tostring(screenHeight)))
 
-	local function updateFilesystems()
-		for i = 2, #filesystems do
-			table.remove(filesystems, 1)
-		end
+	tableInsert(items, #items, newMenuBackElement())
 
-		for address in componentList(stringsFilesystem) do
-			local proxy = componentProxy(address)
-			local label = proxy.getLabel() or "Unnamed"
-			local readOnly = proxy.isReadOnly()
-			local total = proxy.spaceTotal()
-			local percent = total > 0 and mathFloor(proxy.spaceUsed() / total * 100) or 0
-
-			tableInsert(filesystems, 1, newMenuElement(
-				(address == eepromGetData() and "> " or "  ") ..
-				restrict(label, 10) ..
-				restrict(total > 1048575 and "HDD" or (total > 65535 and "FDD" or "SYS"), 3) ..
-				restrict(readOnly and "R  " or "R/W", 3) ..
-				restrict(tostring(percent) .. "%", 4) ..
-				address:sub(1, 8) .. "\u{2026}",
-
-				function()
-					local elements = {
-						newMenuElement("Set as bootable", function()
-							eepromSetData(address)
-							computer.setBootAddress(address)
-							updateFilesystems()
-						end, 1),
-						newMenuBackElement()
-					}
-
-					if not readOnly then
-						tableInsert(elements, 2, newMenuElement(stringsChangeLabel, function()
-							pcall(proxy.setLabel, "New label")
-							updateFilesystems()
-						end))
-
-						tableInsert(elements, 3, newMenuElement("Erase", function()
-							status("Erasing " .. label)
-							local ok, reason = pcall(function() proxy.remove("") end)
-							status(ok and "Erased" or ("Failed: " .. tostring(reason)))
-							updateFilesystems()
-						end))
-					end
-
-					menu(label, elements)
-				end
-			))
-		end
-	end
-
-	updateFilesystems()
-
-	return filesystems
+	return items
 end
 
 local function maintenanceItems()
@@ -598,28 +492,19 @@ local function maintenanceItems()
 end
 
 local function aboutItems()
-	local memory = safeTotalMemory()
-	local stubSize = 0
-
-	do
-		local stored = eepromGet()
-		if type(stored) == "string" then stubSize = #stored end
-	end
+	local version = "unknown"
+	local handle = eepromGetLabel() or stringsTheanOSEFI
 
 	return {
-		newMenuElement("  TheanOS bootloader", nil, nil, "v1.7.5", true),
-		newMenuElement("", nil, nil, nil, true),
-		newMenuElement("Menu source", nil, nil, "/EFI/Boot.lua"),
-		newMenuElement("Stub source", nil, nil, "/EFI/Stub.lua"),
-		newMenuElement("Stub size in eeprom", nil, nil, tostring(stubSize) .. " B"),
-		newMenuElement("Screen", nil, nil, tostring(screenWidth) .. " x " .. tostring(screenHeight)),
-		newMenuElement("Memory", nil, nil, memory and (tostring(mathFloor(memory / 1024)) .. " KB") or "n/a"),
-		newMenuElement("", nil, nil, nil, true),
-		newMenuElement("  The eeprom holds only the small stub that loads", nil, nil, nil, true),
-		newMenuElement("  this menu from disk, so bootloader updates ship", nil, nil, nil, true),
-		newMenuElement("  as ordinary files with no reflashing.", nil, nil, nil, true),
-		newMenuElement("", nil, nil, nil, true),
-		newMenuElement("Hold Alt during boot to open this menu.", nil, nil, nil, true),
+		newMenuElement("TheanOS bootloader"),
+		newMenuElement(""),
+		newMenuElement("Version: 1.7.4"),
+		newMenuElement("Bootloader label: " .. tostring(handle)),
+		newMenuElement(""),
+		newMenuElement("This menu is served from /EFI/Boot.lua."),
+		newMenuElement("EEPROM holds only the small stub that loads it,"),
+		newMenuElement("so the bootloader can be updated without reflashing."),
+		newMenuElement(""),
 		newMenuBackElement()
 	}
 end
@@ -717,77 +602,71 @@ while uptime() < deadline do
 
 		-- Boot actions, above the utilities. "Continue" is the default path and is
 		-- listed first so it is what a stray Enter press lands on.
-		-- Live values on the right, so the top menu doubles as a status screen.
-		local menuDisks, menuTotal, menuUsed = deviceSummary()
-		local menuMemory = safeTotalMemory()
+		tableInsert(utilities, 1, newMenuElement("Continue boot", function()
+			menuExit = true
+		end, 1))
 
-		local function add(text, callback, breakLoop, value, header)
-			tableInsert(utilities, #utilities, newMenuElement(text, callback, breakLoop, value, header))
-		end
-
-		local function add2(list, text, callback, breakLoop, value, header)
-			tableInsert(list, #list, newMenuElement(text, callback, breakLoop, value, header))
-		end
-
-		add("\u{2500} Boot \u{2500}", nil, nil, nil, true)
-		add("Continue boot", function() menuExit = true end, 1, "default")
-
-		add("Boot from device", function()
+		tableInsert(utilities, 2, newMenuElement("Boot from device", function()
 			local devices = { newMenuBackElement() }
-			local found = 0
+			local added = 0
 
 			for address in componentList(stringsFilesystem) do
 				local proxy = componentProxy(address)
+				local label = proxy.getLabel() or "Unnamed"
 				local total = proxy.spaceTotal()
 				local used = proxy.spaceUsed()
 				local percent = total > 0 and mathFloor(used / total * 100) or 0
 
-				found = found + 1
-
-				add2(devices, (address == eepromGetData() and "\u{25B6} " or "  ") ..
-					(proxy.getLabel() or "Unnamed"),
-					nil, nil,
-					(total > 1048575 and "HDD" or (total > 65535 and "FDD" or "SYS")) ..
-					"  " .. percent .. "%")
+				added = added + 1
 
 				tableInsert(devices, #devices, newMenuElement(
+					(address == eepromGetData() and stringsBootMark or "  ") .. label,
 					function()
 						eepromSetData(address)
 						computer.setBootAddress(address)
 						menuExit = true
-					end, 1))
+					end,
+					1
+				))
+
+				tableInsert(devices, #devices, newMenuElement(
+					"      " .. (total > 1048575 and "HDD" or (total > 65535 and "FDD" or "SYS")) ..
+					"  " .. percent .. "%  " .. tostring(total) .. " bytes"
+				))
 			end
 
-			if found == 0 then
-				tableInsert(devices, #devices, newMenuElement("  (no disks found)", nil, nil, nil, true))
+			if added == 0 then
+				tableInsert(devices, #devices, newMenuElement("  (no disks found)"))
 			end
 
 			menu("Boot from device", devices)
-		end)
+		end))
 
-		add("", nil, nil, nil, true)
-		add("\u{2500} Status \u{2500}", nil, nil, nil, true)
-		add("Disks", nil, nil, tostring(menuDisks))
-		add("Space", nil, nil, tostring(menuUsed) .. " / " .. tostring(menuTotal) .. " B")
-		add("Memory", nil, nil, menuMemory and (tostring(mathFloor(menuMemory / 1024)) .. " KB") or "n/a")
+		tableInsert(utilities, 3, newMenuElement("Diagnostics", function()
+			menu("Diagnostics", diagnosticsItems())
+		end))
 
-		add("", nil, nil, nil, true)
-		add("\u{2500} Tools \u{2500}", nil, nil, nil, true)
-		add("Disk utility", function() menu("Select filesystem", diskUtilityItems()) end)
-		add("Diagnostics", function() menu("Diagnostics", diagnosticsItems()) end)
-		add("Maintenance", function() menu("Maintenance", maintenanceItems()) end)
-		add("About", function() menu("About", aboutItems()) end)
+		tableInsert(utilities, 4, newMenuElement("Maintenance", function()
+			menu("Maintenance", maintenanceItems())
+		end))
 
-		if internetAddress then
-			add("", nil, nil, nil, true)
-			add("\u{2500} Network \u{2500}", nil, nil, nil, true)
-			add("System recovery", function() internetExecute("https://tinyurl.com/29urhz7z") end)
-			add(stringsURLBoot, function() internetExecute(input(stringsURLBoot, "Address: ")) end)
+		tableInsert(utilities, 5, newMenuElement("About", function()
+			menu("About", aboutItems())
+		end))
+
+		if internetAddress then	
+			tableInsert(utilities, 6, newMenuElement("System recovery", function()
+				internetExecute("https://tinyurl.com/29urhz7z")
+			end))
+			
+			tableInsert(utilities, 7, newMenuElement(stringsURLBoot, function()
+				internetExecute(input(stringsURLBoot, "Address: "))
+			end))
 		end
 
-		add("", nil, nil, nil, true)
-		add("\u{2500} Power \u{2500}", nil, nil, nil, true)
-		add("Reboot", function() computer.shutdown() end)
+		tableInsert(utilities, #utilities, newMenuElement("Reboot", function()
+			computer.shutdown()
+		end))
 
 		menu(stringsTheanOSEFI .. "  v1.7.4", utilities)
 
