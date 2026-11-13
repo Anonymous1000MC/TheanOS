@@ -801,6 +801,12 @@ end
 local PAGE, SERVICE = 1, false
 
 local function keyListener()
+	-- Draw the current page once on entry so the screen is never stale,
+	-- even if the draw in main() didn't commit before the event loop starts.
+	if PAGE == 1 then
+		pageSystemInfo(true)
+	end
+
 	while true do
 		local event, _, _, key = computer.pullSignal(0.5)
 		local pressed = (event == "key_down" or event == "key_up") and key
@@ -934,6 +940,10 @@ local function main()
 		end
 		disks = surveyDisks()
 		pageSystemInfo(true)
+		-- Yield once so the GPU commits the initial draw before we block on
+		-- pullSignal in the event loop. Without this, a freshly-flashed machine
+		-- can show a stale screen until the first key press.
+		computer.pullSignal(0)
 		keyListener()
 		return bootNormally()
 	end
