@@ -799,6 +799,7 @@ end
 -------------------------------------------------------------------------------
 
 local PAGE, SERVICE = 1, false
+local page1RefreshDeadline = computer.uptime() + 0.5
 
 local function keyListener()
 	-- Draw the current page once on entry so the screen is never stale,
@@ -891,6 +892,15 @@ local function keyListener()
 				elseif key == 28 then -- enter: rescan all disks
 					disks = surveyDisks()
 					pageRecovery()
+				end
+			end
+
+			-- Live refresh for page 1 (system information): uptime, memory, disks.
+			if PAGE == 1 then
+				local now = computer.uptime()
+				if now >= page1RefreshDeadline then
+					pageSystemInfo(false)
+					page1RefreshDeadline = now + 0.5
 				end
 			end
 		end
