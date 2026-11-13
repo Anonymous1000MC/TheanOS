@@ -4,6 +4,15 @@ local function getComponentAddress(name)
 	return component.list(name)() or error("Required " .. name .. " component is missing")
 end
 
+-- Safe sleep: tries computer.sleep, falls back to a busy-wait via pullSignal
+-- so an installer pause never crashes on a build where computer.sleep is nil.
+local function safeSleep(seconds)
+	local ok = pcall(computer.sleep, seconds)
+	if ok then return end
+	local deadline = computer.uptime() + seconds
+	repeat until computer.uptime() >= deadline
+end
+
 local EEPROMAddress, internetAddress, GPUAddress = 
 	getComponentAddress("eeprom"),
 	getComponentAddress("internet"),
@@ -889,7 +898,7 @@ addStage(function()
 	if #bootloader == 0 then
 		addTitle("error", localization.efiFailed or "Could not download the bootloader")
 		workspace:draw()
-		computer.sleep(5)
+		safeSleep(5)
 	else
 		local size = #bootloader
 		addTitle("muted", localization.flashing)
@@ -908,7 +917,7 @@ addStage(function()
 		end
 
 		workspace:draw()
-		computer.sleep(2)
+		safeSleep(2)
 	end
 
 

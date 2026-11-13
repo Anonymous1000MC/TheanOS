@@ -86,7 +86,7 @@ do
 			if message then
 				break
 			else
-				os.sleep(0.1)
+				computer.sleep(0.1)
 			end
 		end
 	end

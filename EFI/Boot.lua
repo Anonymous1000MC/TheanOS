@@ -820,7 +820,9 @@ local function keyListener()
 					bootFromDisk(disk)
 				end
 			elseif PAGE == 1 then
-				if key == 203 or key == 205 then -- left/right: next page
+				if key == 203 then -- left: previous page
+					PAGE = PAGE == 1 and #TABS or (PAGE - 1)
+				elseif key == 205 then -- right: next page
 					PAGE = PAGE == #TABS and 1 or (PAGE + 1)
 				elseif key == 63 then -- F5: refresh
 					pageSystemInfo(true)
@@ -886,9 +888,6 @@ local function keyListener()
 				end
 			end
 		end
-
-		-- Page 1 is a live report, so it refreshes on its own.
-		if PAGE == 1 then pageSystemInfo(false) end
 	end
 end
 
