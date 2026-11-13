@@ -3355,11 +3355,21 @@ end
 
 -- Keeping temporary file's last modified timestamp as boot timestamp
 do
-	local proxy, path = component.proxy(computer.tmpAddress()), "timestamp"
-	
-	proxy.close(proxy.open(path, "wb"))
-	bootRealTime = math.floor(proxy.lastModified(path) / 1000)
-	proxy.remove(path)
+	local tmpAddress = computer.tmpAddress()
+
+	if tmpAddress then
+		local ok, proxy = pcall(component.proxy, tmpAddress)
+
+		if ok and proxy then
+			local handle = proxy.open("timestamp", "wb")
+
+			if handle then
+				proxy.close(handle)
+				bootRealTime = math.floor(proxy.lastModified("timestamp") / 1000)
+				proxy.remove("timestamp")
+			end
+		end
+	end
 end
 
 -- Global print() function for debugging

@@ -1,8 +1,61 @@
 -- Pizda
 ---------------------------------------- System initialization ----------------------------------------
 
--- Obtaining boot filesystem component proxy
-local bootFilesystemProxy = component.proxy(component.invoke(component.list("eeprom")(), "getData"))
+-- Obtaining boot filesystem component proxy. The EEPROM holds the boot address
+-- (written by the firmware before handoff). If it is missing or invalid, scan
+-- the filesystems for /OS.lua so the machine can still boot instead of dying.
+local function resolveBootProxy()
+	local eepromAddress = component.list("eeprom")()
+
+	if eepromAddress then
+		local ok, data = pcall(component.invoke, eepromAddress, "getData")
+
+		if ok and type(data) == "string" and data ~= "" then
+			local ok2, proxy = pcall(component.proxy, data)
+
+			if ok2 and type(proxy) == "table" and type(proxy.open) == "function" then
+				return proxy
+			end
+		end
+	end
+
+	for address in component.list("filesystem") do
+		local proxy = component.proxy(address)
+
+		if proxy and proxy.exists("/OS.lua") then
+			return proxy
+		end
+	end
+
+	return nil
+end
+
+local bootFilesystemProxy = resolveBootProxy()
+
+if not bootFilesystemProxy then
+	local gpuAddress = component.list("gpu")()
+
+	if gpuAddress then
+		local g = component.proxy(gpuAddress)
+		local screenAddress = component.list("screen")()
+
+		if g and screenAddress then
+			pcall(component.invoke, gpuAddress, "bind", screenAddress)
+		end
+
+		if g then
+			pcall(component.invoke, gpuAddress, "setBackground", 0xE05A5A)
+			pcall(component.invoke, gpuAddress, "set", 1, 1, 0xFFFFFF, "No bootable TheanOS disk found.")
+			pcall(component.invoke, gpuAddress, "set", 1, 3, 0xD8DEE9, "Reboot and open the firmware to select a boot device.")
+		end
+	end
+
+	computer.pullSignal(5)
+
+	-- Return cleanly: no crash, no blue screen, the machine sits here until
+	-- rebooted into the firmware.
+	return
+end
 
 -- Executes file from boot HDD during OS initialization (will be overriden in filesystem library later)
 function dofile(path)
@@ -95,7 +148,24 @@ function require(module)
 end
 
 local GPUAddress = component.list("gpu")()
-local screenWidth, screenHeight = component.invoke(GPUAddress, "getResolution")
+local screenWidth, screenHeight = 80, 25
+
+if not GPUAddress then
+	-- The graphical desktop requires a GPU. Without one there is nothing to
+	-- draw on, so report plainly and return to the firmware instead of
+	-- panicking into a blue kernel-panic screen.
+	print("TheanOS: no GPU found. The graphical desktop cannot start.")
+	print("Reboot and open the firmware to check hardware detection.")
+	computer.pullSignal(5)
+
+	return
+end
+
+local ok, w, h = pcall(component.invoke, GPUAddress, "getResolution")
+
+if ok and w and h then
+	screenWidth, screenHeight = w, h
+end
 
 -- Displays title and currently required library when booting OS
 local UIRequireTotal, UIRequireCounter = 14, 1
@@ -125,8 +195,8 @@ local function UIRequire(module)
 end
 
 -- Preparing screen for loading libraries
-component.invoke(GPUAddress, "setBackground", 0x000000)
-component.invoke(GPUAddress, "fill", 1, 1, screenWidth, screenHeight, " ")
+pcall(component.invoke, GPUAddress, "setBackground", 0x000000)
+pcall(component.invoke, GPUAddress, "fill", 1, 1, screenWidth, screenHeight, " ")
 
 -- Loading libraries
 bit32 = bit32 or UIRequire("Bit32")
@@ -150,7 +220,15 @@ local image = UIRequire("Image")
 local screen = UIRequire("Screen")
 
 -- Setting currently chosen GPU component as screen buffer main one
-screen.setGPUAddress(GPUAddress)
+local ok, bindReason = pcall(screen.setGPUAddress, GPUAddress)
+
+if not ok then
+	print("TheanOS: failed to bind GPU to screen: " .. tostring(bindReason))
+	print("The graphical desktop cannot start.")
+	computer.pullSignal(5)
+
+	return
+end
 
 local GUI = UIRequire("GUI")
 local system = UIRequire("System")
