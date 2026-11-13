@@ -813,6 +813,8 @@ local function keyListener()
 		local pressed = (event == "key_down" or event == "key_up") and key
 
 		if pressed then
+			local previousPage = PAGE
+
 			if key == 67 then -- F9: exit setup, boot normally
 				return
 			end
@@ -892,18 +894,34 @@ local function keyListener()
 				elseif key == 28 then -- enter: rescan all disks
 					disks = surveyDisks()
 					pageRecovery()
-				end
-			end
-
-			-- Live refresh for page 1 (system information): uptime, memory, disks.
-			if PAGE == 1 then
-				local now = computer.uptime()
-				if now >= page1RefreshDeadline then
-					pageSystemInfo(false)
-					page1RefreshDeadline = now + 0.5
-				end
 			end
 		end
+
+		-- When a tab switch changed the page, draw the new page immediately
+		-- so the screen updates without needing F5.
+		if PAGE ~= previousPage then
+			if PAGE == 1 then
+				pageSystemInfo(true)
+			elseif PAGE == 2 then
+				pageBoot(nil, true)
+			elseif PAGE == 3 then
+				pageSettings()
+			elseif PAGE == 4 then
+				pageDiagnostics()
+			elseif PAGE == 5 then
+				pageRecovery()
+			end
+		end
+	end
+
+	-- Live refresh for page 1 (system information): uptime, memory, disks.
+	if PAGE == 1 then
+		local now = computer.uptime()
+		if now >= page1RefreshDeadline then
+			pageSystemInfo(false)
+			page1RefreshDeadline = now + 0.5
+		end
+	end
 	end
 end
 
