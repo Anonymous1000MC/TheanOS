@@ -906,15 +906,15 @@ local function HiMenu()
 	fillBackground()
 
 	set(11, 1, 'Advanced BIOS by titan123023')
-	set(7, 15, 'Press F12 to enter the settings menu')
+	set(7, 15, 'Press Alt to enter the settings menu')
 	set(8, 16, 'Press any key to skip this message')
 
 	local goToMenu
 	while true do
 		local e, _, _, k = computer.pullSignal(5)
 		if e ~= nil then
-			if e == 'key_up' then
-				if k == 88 then -- Alt
+			if e == 'key_down' then
+				if k == 56 or k == 27 then -- Alt or Esc
 					goToMenu = true
 					break
 				else
@@ -935,7 +935,7 @@ local function HiMenu()
 
 	while true do
 		local e, _, _, k = computer.pullSignal(0.5)
-		if e == 'key_up' and k == 88 then
+		if e == 'key_down' and (k == 56 or k == 27) then
 			break
 		end
 		safeBeep()
