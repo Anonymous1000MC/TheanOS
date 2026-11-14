@@ -59,7 +59,8 @@ local panelX = WIDTH - 24
 
 local function set(x, y, colour, text)
 	if not gpu or not text then return end
-	if x < 1 or y < 1 or x > WIDTH then return end
+	if type(x) ~= "number" or type(y) ~= "number" then return end
+	if not WIDTH or x < 1 or y < 1 or x > WIDTH then return end
 	pcall(function() gpu.setForeground(colour) end)
 	pcall(function() gpu.set(x, y, text) end)
 end
@@ -374,6 +375,9 @@ local function chrome(active, title, subtitle)
 		set(3, 6, C.dim, subtitle)
 	end
 	centre(HEIGHT, C.dim, "F12 setup   F5 refresh   F9 exit")
+	-- Reset GPU background to C.bg so page content drawn with set() uses the
+	-- correct background regardless of what fill() left it at.
+	pcall(function() gpu.setBackground(C.bg) end)
 	return 8
 end
 
@@ -799,6 +803,7 @@ end
 -------------------------------------------------------------------------------
 
 local PAGE, SERVICE = 1, false
+local previousPage = PAGE
 local page1RefreshDeadline = computer.uptime() + 0.5
 
 local function keyListener()
@@ -813,7 +818,6 @@ local function keyListener()
 		local pressed = (event == "key_down" or event == "key_up") and key
 
 		if pressed then
-			local previousPage = PAGE
 
 			if key == 67 then -- F9: exit setup, boot normally
 				return
@@ -830,17 +834,25 @@ local function keyListener()
 				end
 			elseif PAGE == 1 then
 				if key == 203 then -- left: previous page
+					previousPage = PAGE
 					PAGE = PAGE == 1 and #TABS or (PAGE - 1)
+					pageSystemInfo(true)
 				elseif key == 205 then -- right: next page
+					previousPage = PAGE
 					PAGE = PAGE == #TABS and 1 or (PAGE + 1)
+					pageSystemInfo(true)
 				elseif key == 63 then -- F5: refresh
 					pageSystemInfo(true)
 				end
 			elseif PAGE == 2 then
 				if key == 203 then -- left: previous page
+					previousPage = PAGE
 					PAGE = PAGE == 1 and #TABS or (PAGE - 1)
+					pageSystemInfo(true)
 				elseif key == 205 then -- right: next page
+					previousPage = PAGE
 					PAGE = PAGE == #TABS and 1 or (PAGE + 1)
+					pageBoot(nil, true)
 				elseif key == 200 and selected > 1 then -- up: previous disk
 					selected = selected - 1
 					pageBoot(selected)
@@ -855,9 +867,13 @@ local function keyListener()
 				end
 			elseif PAGE == 3 then
 				if key == 203 then -- left: previous page
+					previousPage = PAGE
 					PAGE = PAGE == 1 and #TABS or (PAGE - 1)
+					pageSystemInfo(true)
 				elseif key == 205 then -- right: next page
+					previousPage = PAGE
 					PAGE = PAGE == #TABS and 1 or (PAGE + 1)
+					pageSettings()
 				elseif key == 200 and settingIndex > 1 then
 					settingIndex = settingIndex - 1
 					pageSettings()
@@ -880,36 +896,28 @@ local function keyListener()
 				end
 			elseif PAGE == 4 then
 				if key == 203 then -- left: previous page
+					previousPage = PAGE
 					PAGE = PAGE == 1 and #TABS or (PAGE - 1)
+					pageSystemInfo(true)
 				elseif key == 205 then -- right: next page
+					previousPage = PAGE
 					PAGE = PAGE == #TABS and 1 or (PAGE + 1)
+					pageBoot(nil, true)
 				elseif key == 63 then -- F5: refresh
 					pageDiagnostics()
 				end
 			elseif PAGE == 5 then
 				if key == 203 then -- left: previous page
+					previousPage = PAGE
 					PAGE = PAGE == 1 and #TABS or (PAGE - 1)
+					pageSystemInfo(true)
 				elseif key == 205 then -- right: next page
+					previousPage = PAGE
 					PAGE = PAGE == #TABS and 1 or (PAGE + 1)
+					pageBoot(nil, true)
 				elseif key == 28 then -- enter: rescan all disks
 					disks = surveyDisks()
 					pageRecovery()
-			end
-		end
-
-		-- When a tab switch changed the page, draw the new page immediately
-		-- so the screen updates without needing F5.
-		if PAGE ~= previousPage then
-			if PAGE == 1 then
-				pageSystemInfo(true)
-			elseif PAGE == 2 then
-				pageBoot(nil, true)
-			elseif PAGE == 3 then
-				pageSettings()
-			elseif PAGE == 4 then
-				pageDiagnostics()
-			elseif PAGE == 5 then
-				pageRecovery()
 			end
 		end
 	end
