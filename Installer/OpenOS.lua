@@ -2,6 +2,15 @@ local component = require("component")
 local computer = require("computer")
 local os = require("os")
 
+-- Safe sleep: tries computer.sleep, falls back to a busy-wait via pullSignal
+-- so the installer never crashes on a build where computer.sleep is nil.
+local function safeSleep(seconds)
+	local ok = pcall(computer.sleep, seconds)
+	if ok then return end
+	local deadline = computer.uptime() + seconds
+	repeat until computer.uptime() >= deadline
+end
+
 local gpu = component.gpu
 
 -- Checking if computer is tough enough for such a S T Y L I S H product as TheanOS
@@ -86,7 +95,7 @@ do
 			if message then
 				break
 			else
-				computer.sleep(0.1)
+				safeSleep(0.1)
 			end
 		end
 	end
