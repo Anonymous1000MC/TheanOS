@@ -403,35 +403,39 @@ local function ClearLastPage()
 end
 
 local function got()
-	setResolution(74, 25)
+	-- Request 74x25; fall back gracefully if the hardware can't do it.
+	local ok, w, h = pcall(function() return gpu.setResolution(74, 25) end)
+	if not ok then
+		w, h = gpu.getResolution()
+	end
 	setBackground(C.bg)
 	setForeground(C.text)
-	fill(1, 1, 74, 25, ' ')
+	fill(1, 1, w or 74, h or 25, ' ')
 	set(1, 3, '╔')
-	fill(2, 3, 72, 1, '═')
-	set(74, 3, '╗')
-	fill(1, 4, 1, 20, '║')
-	fill(74, 4, 1, 20, '║')
-	fill(2, 24, 72, 1, '═')
-	set(1, 24, '╚')
-	set(74, 24, '╝')
-	set(49, 3, '╦')
-	fill(49, 4, 1, 20, '║')
-	set(49, 24, '╩')
+	fill(2, 3, (w or 74) - 2, 1, '═')
+	set(w or 74, 3, '╗')
+	fill(1, 4, 1, h and (h - 1) or 20, '║')
+	fill(w or 74, 4, 1, h and (h - 1) or 20, '║')
+	fill(2, h or 24, (w or 74) - 2, 1, '═')
+	set(1, h or 24, '╚')
+	set(w or 74, h or 24, '╝')
+	set((w or 74) - 25, 3, '╦')
+	fill((w or 74) - 25, 4, 1, h and (h - 1) or 20, '║')
+	set((w or 74) - 25, h or 24, '╩')
 	set(1, 5, '╟───────────────────────────────────────────────╢')
 	setBackground(C.accent)
-	fill(1, 1, 74, 1, ' ')
+	fill(1, 1, w or 74, 1, ' ')
 	setForeground(C.text)
-	set(23, 1, 'Advanced BIOS setup utility')
+	set(math.floor((w or 74) / 2 - 14), 1, 'Advanced BIOS setup utility')
 	setBackground(C.panel)
-	fill(1, 2, 74, 1, ' ')
+	fill(1, 2, w or 74, 1, ' ')
 	setForeground(C.text)
 	set(3, 2, '  System information  ')
-	set(25, 2, '  Boot or repair  ')
-	set(43, 2, '  Bios settings  ')
-	fill(1, 25, 74, 1, ' ')
+	set(math.floor((w or 74) / 2 - 8), 2, '  Boot or repair  ')
+	set((w or 74) - 30, 2, '  Bios settings  ')
+	fill(1, h or 25, w or 74, 1, ' ')
 	setForeground(C.dim)
-	SetTextInTheMiddle(25, 74, 'v' .. BiosVersion .. ' TheanOS EFI')
+	SetTextInTheMiddle(h or 25, w or 74, 'v' .. BiosVersion .. ' TheanOS EFI')
 end
 
 local function GetSystemInformationPage()
@@ -751,8 +755,12 @@ local function POST()
 		safeBeep(2000, 2)
 	end
 
-	if invoke(cl('eeprom')(), 'getData') == '' then
-		Bios.FormatData()
+	local eepromAddr = cl('eeprom')()
+	if eepromAddr then
+		local data = invoke(eepromAddr, 'getData')
+		if data == '' then
+			Bios.FormatData()
+		end
 	end
 
 	return true
@@ -938,5 +946,12 @@ local function HiMenu()
 end
 ------------
 
-POST()
-HiMenu()
+if POST() then
+	HiMenu()
+else
+	-- No GPU/screen: try to boot from disk without graphics.
+	BootWithoutAddress()
+	while true do
+		computer.pullSignal(5)
+	end
+end
