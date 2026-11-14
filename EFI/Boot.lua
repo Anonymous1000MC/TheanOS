@@ -191,11 +191,23 @@ local function setForeground(a)
 end
 
 local function fill(...)
-	gpu.fill(...)
+	local args = {...}
+	if type(args[5]) == 'number' and type(args[6]) == 'string' then
+		setBackground(args[5])
+		gpu.fill(args[1], args[2], args[3], args[4], args[6])
+	else
+		gpu.fill(...)
+	end
 end
 
 local function set(...)
-	gpu.set(...)
+	local args = {...}
+	if type(args[3]) == 'number' and type(args[4]) == 'string' then
+		setForeground(args[3])
+		gpu.set(args[1], args[2], args[4])
+	else
+		gpu.set(...)
+	end
 end
 
 local function setResolution(...)
