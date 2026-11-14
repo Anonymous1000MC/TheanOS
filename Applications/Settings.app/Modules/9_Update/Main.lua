@@ -663,31 +663,37 @@ local function flashBios()
 		-- clears the boot address, and a bootloader with no boot address leaves the
 		-- firmware unable to validate it -- it boots to "expected string, got nil".
 		-- 1.7.0 shipped without the setData call below and bricked exactly that way.
-		local previousAddress = component.invoke(eeprom, "getData")
-		local previousLabel = component.invoke(eeprom, "getLabel")
+		local ok, previousAddress = pcall(component.invoke, eeprom, "getData")
+		local ok2, previousLabel = pcall(component.invoke, eeprom, "getLabel")
+		if not ok or not ok2 then
+			closeOverlay()
+			GUI.alert(t("biosTitle", "Flash BIOS"), t("biosReadError", "Could not read EEPROM data."))
+			workspace:draw()
+			return
+		end
 
-		local success = component.invoke(eeprom, "set", payload)
+		local ok3, success = pcall(component.invoke, eeprom, "set", payload)
 
 		closeOverlay()
 
-		if success == false then
+		if not ok3 or success == false then
 			GUI.alert(t("biosTitle", "Flash BIOS"), t("biosTooLarge", "EEPROM cannot hold %d bytes."):format(#payload))
 		else
-			component.invoke(eeprom, "setLabel", previousLabel or "TheanOS EFI")
+			pcall(component.invoke, eeprom, "setLabel", previousLabel or "TheanOS EFI")
 
 			-- Restore the boot device. Falling back to the running filesystem is
 			-- what a fresh flash should use; the installer passes its own explicitly.
-			local bootAddress = previousAddress or paths.system.filesystem
+			local bootAddress = previousAddress
 
 			if bootAddress then
-				component.invoke(eeprom, "setData", bootAddress)
+				pcall(component.invoke, eeprom, "setData", bootAddress)
 			end
 
 			-- Read back rather than trusting the write. Claiming success on a
 			-- half-written EEPROM is how this got shipped.
-			local stored = component.invoke(eeprom, "get")
+			local ok4, stored = pcall(component.invoke, eeprom, "get")
 
-			if type(stored) == "string" and #stored == #payload then
+			if ok4 and type(stored) == "string" and #stored == #payload then
 				GUI.alert(t("biosTitle", "Flash BIOS"), t("biosDone", "Bootloader flashed and verified."))
 			else
 				GUI.alert(t("biosTitle", "Flash BIOS"),
